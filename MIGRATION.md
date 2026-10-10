@@ -8,3 +8,5 @@ Only the runtime regression workflow is enabled in this new source repository. O
 
 
 Runtime regression attempt1 detected a missing dependency bootstrap entrypoint before any runtime test. Added scripts/bootstrap.sh with explicit dependency/browser setup and failure propagation; all existing checks retained for attempt2.
+
+Attempt2 passed structural validation and graphical startup, then found pytest missing in the historical public dependency manifest. Added pytest to computer/requirements.txt; attempt3 retains all tests.
