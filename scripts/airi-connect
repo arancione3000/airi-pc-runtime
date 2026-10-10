@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+BASE=/home/user/airi
+REPO=https://github.com/arancione3000/airi-pc-runtime.git
+bootstrap_runtime() {
+  mkdir -p /home/user
+  TMP=/tmp/airi-connect-bootstrap-$$
+  rm -rf "$TMP"
+  mkdir -p "$TMP/source"
+  git -C "$TMP/source" init -q
+  git -C "$TMP/source" remote add origin "$REPO"
+  EXPECTED_SHA="$(git ls-remote "$REPO" refs/heads/main | awk '{print $1}')"
+  [ -n "$EXPECTED_SHA" ] || { echo AIRI_PC_SOURCE_REF_MISSING >&2; exit 5; }
+  git -C "$TMP/source" fetch -q --depth=1 origin main || { echo AIRI_PC_GIT_FETCH_FAILED >&2; exit 6; }
+  FETCHED_SHA="$(git -C "$TMP/source" rev-parse FETCH_HEAD)"
+  [ "$FETCHED_SHA" = "$EXPECTED_SHA" ] || { echo AIRI_PC_SOURCE_SHA_MISMATCH >&2; exit 7; }
+  git -C "$TMP/source" checkout -q -b main "$FETCHED_SHA" || { echo AIRI_PC_BRANCH_CHECKOUT_FAILED >&2; exit 8; }
+  if [ -e "$BASE" ]; then BACKUP="${BASE}.backup.$(date +%s)"; mv "$BASE" "$BACKUP" || { echo AIRI_PC_WORKSPACE_BACKUP_FAILED >&2; exit 9; }; fi
+  mv "$TMP/source" "$BASE"
+  rm -rf "$TMP"
+}
+
+if [ ! -x "$BASE/computer/start.sh" ]; then
+  bootstrap_runtime
+fi
+chmod +x "$BASE"/scripts/airi-* "$BASE"/computer/start.sh 2>/dev/null || true
+"$BASE/scripts/airi-next-session"
+if [ -x "$BASE/scripts/airi-tailscale-supervisor" ]; then
+  nohup "$BASE/scripts/airi-tailscale-supervisor" >>"$BASE/logs/tailscale-supervisor-launch.log" 2>&1 < /dev/null &
+fi

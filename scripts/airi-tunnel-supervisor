@@ -1,0 +1,206 @@
+#!/bin/sh
+set -eu
+
+BASE=/home/user/airi
+STATE="$BASE/.ai/state/tunnel"
+LOG="$BASE/logs/tunnel.log"
+PIDFILE="$STATE/pid"
+URLFILE="$STATE/url"
+STATUSFILE="$STATE/status.json"
+TAILSCALE_URLFILE="$BASE/.ai/state/tailscale/url"
+LOCKDIR="$STATE/supervisor.lock"
+ROTATE_SECONDS="${AIRI_TUNNEL_ROTATE_SECONDS:-3000}"
+CHECK_INTERVAL="${AIRI_TUNNEL_INTERVAL:-10}"
+GRACE_SECONDS="${AIRI_TUNNEL_GRACE_SECONDS:-10}"
+CANDIDATE_WAIT="${AIRI_TUNNEL_CANDIDATE_WAIT:-30}"
+FAILS=0
+
+mkdir -p "$STATE" "$BASE/logs"
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+  LOCKPID=$(cat "$LOCKDIR/pid" 2>/dev/null || true)
+  if [ -n "$LOCKPID" ] && kill -0 "$LOCKPID" 2>/dev/null; then exit 0; fi
+  rm -rf "$LOCKDIR"; mkdir "$LOCKDIR"
+fi
+printf '%s\n' "$$" >"$LOCKDIR/pid"
+
+atomic_write() {
+  target=$1
+  value=$2
+  tmp="$target.tmp.$$"
+  printf '%s\n' "$value" >"$tmp"
+  mv -f "$tmp" "$target"
+}
+
+write_status() {
+  atomic_write "$STATUSFILE" "{\"status\":\"$1\",\"url\":\"${2:-}\",\"updated_at\":$(date +%s)}"
+}
+
+tunnel_pid_matches() {
+  p=$1
+  [ -r "/proc/$p/cmdline" ] || return 1
+  tr '\000' ' ' < "/proc/$p/cmdline" | grep -Eq '(^| )ssh( |).*free\.pinggy\.io( |$)' || return 1
+  tr '\000' ' ' < "/proc/$p/cmdline" | grep -Fq ' -R0:127.0.0.1:9010 ' || return 1
+}
+
+pid_alive() {
+  [ -s "$1" ] || return 1
+  p=$(cat "$1" 2>/dev/null || true)
+  [ -n "$p" ] || return 1
+  case "$p" in ''|*[!0-9]*) return 1;; esac
+  kill -0 "$p" 2>/dev/null && tunnel_pid_matches "$p"
+}
+
+tailscale_healthy() {
+  u=$(cat "$TAILSCALE_URLFILE" 2>/dev/null || true)
+  [ -n "$u" ] && curl -fsS --max-time 8 -H 'X-Airi-PC-Health: 1' "$u/status" >/dev/null 2>&1
+}
+
+extract_url() {
+  grep -Eo 'https://[^[:space:]]+run\.pinggy-free\.link' "$1" 2>/dev/null | tail -n1 || true
+}
+
+health_url() {
+  u=$1
+  [ -n "$u" ] && curl -fsS --max-time 8 -H 'X-Pinggy-No-Screen: 1' "$u/status" >/dev/null 2>&1
+}
+
+write_manifest() {
+  u=${1:-$(cat "$URLFILE" 2>/dev/null || true)}
+  mkdir -p "$BASE/.ai/state"
+  atomic_write "$BASE/.ai/state/airi-endpoint.json" "{\"url\":\"$u\",\"local\":\"http://127.0.0.1:9010\",\"mcp\":\"$u/mcp\",\"updated_at\":$(date +%s)}"
+}
+
+kill_pid() {
+  p=$1
+  [ -n "$p" ] || return 0
+  case "$p" in ''|*[!0-9]*) return 0;; esac
+  tunnel_pid_matches "$p" || return 0
+  kill "$p" 2>/dev/null || true
+  for _ in 1 2 3 4 5; do
+    kill -0 "$p" 2>/dev/null || return 0
+    sleep 1
+  done
+  kill -9 "$p" 2>/dev/null || true
+}
+
+start_candidate() {
+  out=$1
+  : >"$out"
+  nohup ssh -N -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 \
+      -o TCPKeepAlive=yes -o ConnectTimeout=10 \
+      -p 443 -R0:127.0.0.1:9010 free.pinggy.io \
+      >>"$out" 2>&1 < /dev/null &
+  echo $!
+}
+
+candidate_ready() {
+  file=$1
+  waited=0
+  while [ "$waited" -lt "$CANDIDATE_WAIT" ]; do
+    u=$(extract_url "$file")
+    if [ -n "$u" ] && health_url "$u"; then
+      printf '%s\n' "$u"
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+start_initial() {
+  if tailscale_healthy; then
+    write_status "standby" "$(cat "$TAILSCALE_URLFILE" 2>/dev/null || true)"
+    return 0
+  fi
+  rm -f "$PIDFILE"
+  tmp="$STATE/initial.$$.log"
+  write_status "starting" ""
+  p=$(start_candidate "$tmp")
+  u=$(candidate_ready "$tmp" || true)
+  if [ -n "$u" ]; then
+    atomic_write "$PIDFILE" "$p"
+    atomic_write "$URLFILE" "$u"
+    cp "$tmp" "$LOG"
+    atomic_write "$STATE/started_at" "$(date +%s)"
+    write_manifest "$u"
+    write_status "online" "$u"
+    rm -f "$tmp"
+    return 0
+  fi
+  kill_pid "$p"
+  rm -f "$tmp"
+  write_status "error" ""
+  return 1
+}
+
+rotate_tunnel() {
+  if tailscale_healthy; then
+    write_status "standby" "$(cat "$TAILSCALE_URLFILE" 2>/dev/null || true)"
+    return 0
+  fi
+  oldpid=$(cat "$PIDFILE" 2>/dev/null || true)
+  oldurl=$(cat "$URLFILE" 2>/dev/null || true)
+  tmp="$STATE/candidate.$$.log"
+  newpid=$(start_candidate "$tmp")
+  newurl=$(candidate_ready "$tmp" || true)
+
+  if [ -z "$newurl" ]; then
+    kill_pid "$newpid"
+    rm -f "$tmp"
+    write_status "online" "$oldurl"
+    write_manifest "$oldurl"
+    return 1
+  fi
+
+  # Atomic hand-over: publish the verified new endpoint first, then retire old.
+  atomic_write "$PIDFILE" "$newpid"
+  atomic_write "$URLFILE" "$newurl"
+  cp "$tmp" "$LOG"
+  rm -f "$tmp"
+  atomic_write "$STATE/started_at" "$(date +%s)"
+  write_manifest "$newurl"
+  write_status "online" "$newurl"
+  sleep "$GRACE_SECONDS"
+  [ -z "$oldpid" ] || [ "$oldpid" = "$newpid" ] || kill_pid "$oldpid"
+  return 0
+}
+
+cleanup() {
+  rm -f "$LOCKDIR/pid"
+  rmdir "$LOCKDIR" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM HUP
+
+while :; do
+  if tailscale_healthy; then
+    write_status "standby" "$(cat "$TAILSCALE_URLFILE" 2>/dev/null || true)"
+    FAILS=0
+    sleep "$CHECK_INTERVAL"
+    continue
+  fi
+  if ! pid_alive "$PIDFILE"; then
+    start_initial || true
+  fi
+  url=$(cat "$URLFILE" 2>/dev/null || true)
+  if pid_alive "$PIDFILE" && health_url "$url"; then
+    FAILS=0
+    write_manifest "$url"
+  else
+    FAILS=$((FAILS + 1))
+  fi
+
+  now=$(date +%s)
+  started=$(cat "$STATE/started_at" 2>/dev/null || echo "$now")
+  age=$((now - started))
+
+  if [ "$age" -ge "$ROTATE_SECONDS" ]; then
+    rotate_tunnel || true
+    FAILS=0
+  elif [ "$FAILS" -ge 3 ]; then
+    rotate_tunnel || true
+    FAILS=0
+  fi
+  sleep "$CHECK_INTERVAL"
+done

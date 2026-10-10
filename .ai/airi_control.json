@@ -1,0 +1,5 @@
+{
+  "protocol": 2,
+  "relay_base": "https://ntfy.sh",
+  "bootstrap_topic": "airi-control-bootstrap-2e6a6f6c97314f2ba8d6c41e2fa1e4d2"
+}

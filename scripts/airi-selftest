@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+import json, os, subprocess, time, urllib.request, concurrent.futures
+from pathlib import Path
+BASE=os.environ.get('AIRIPC_STATUS_URL','http://127.0.0.1:9010/status').rsplit('/status',1)[0]
+ROOT=Path(os.environ.get('AIRIPC_WORKSPACE_ROOT','/home/user/airi')).expanduser()
+ENV={**os.environ,'DISPLAY':os.environ.get('DISPLAY',':99'),
+     'PLAYWRIGHT_BROWSERS_PATH':os.environ.get('PLAYWRIGHT_BROWSERS_PATH',str(ROOT/'.cache/ms-playwright'))}
+def get(path):
+    last=None
+    for attempt in range(8):
+        try:
+            with urllib.request.urlopen(BASE+path,timeout=20) as r:return json.loads(r.read())
+        except Exception as exc:
+            last=exc; time.sleep(0.5)
+    raise last
+def post(path,payload):
+    req=urllib.request.Request(BASE+path,data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'},method='POST')
+    last=None
+    for attempt in range(8):
+        try:
+            with urllib.request.urlopen(req,timeout=30) as r:return json.loads(r.read())
+        except Exception as exc:
+            last=exc; time.sleep(0.5)
+    raise last
+def ctl(*args):
+    p=subprocess.run(['/bin/sh',str(ROOT/'scripts/airi-control'),*args],env=ENV,text=True,capture_output=True,timeout=45)
+    return p.returncode,p.stdout.strip(),p.stderr.strip()
+def ensure_browser():
+    cache=Path(ENV['PLAYWRIGHT_BROWSERS_PATH']).expanduser()
+    if any(cache.glob('chromium-*/chrome-linux*/chrome')): return True
+    py=ROOT/'.venv/bin/python'
+    try:
+        p=subprocess.run([str(py),'-m','playwright','install','chromium'],cwd=str(ROOT),env=ENV,text=True,capture_output=True,timeout=170)
+        return p.returncode==0
+    except subprocess.TimeoutExpired:return False
+def main():
+    R={}
+    st=get('/status'); R['status']=st.get('gui_available') is True and st.get('resolution')=='1280x800'
+    obs=get('/observe'); R['observe']=obs.get('ok') is True
+    ss=get('/screenshot'); R['screenshot']=ss.get('width')==1280 and len(ss.get('data_base64',''))>100
+    R['windows']=isinstance(get('/windows').get('windows'),list)
+    c,_,_=ctl('move','333','222'); pos=get('/mouse/position'); R['mouse_move']=c==0 and pos=={'x':333,'y':222}
+    R['browser_preflight']=ensure_browser();
+    if not R['browser_preflight']:
+        print(json.dumps(R,indent=2)); print('ALL=',False); return 1
+    c,_,_=ctl('browser-open',BASE+'/self-test'); R['browser_navigation']=c==0
+    time.sleep(.4)
+    bstate=post('/action',{'action':'browser_state','payload':{}}); R['browser_state']=bstate.get('url')==BASE+'/self-test'
+    bst=post('/action',{'action':'browser_status','payload':{}}); R['browser']=bst.get('open') is True
+    def browser_state_probe(_): return post('/action',{'action':'browser_state','payload':{}})
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+        probes=list(ex.map(browser_state_probe, range(4)))
+    R['browser_concurrency']=all(x.get('ok') is True for x in probes)
+    bss=post('/action',{'action':'browser_screenshot','payload':{}}); R['browser_screenshot']=bss.get('format')=='png' and len(bss.get('data_base64',''))>100
+    c,_,_=ctl('click-element','AIRI_CLICK_TARGET'); bstate=post('/action',{'action':'browser_state','payload':{}}); R['click']=c==0 and bstate.get('status')=='AIRI_CLICK_OK'
+    c,_,_=ctl('click-element','AIRI_INPUT_FIELD'); c2,_,_=ctl('type','AIRI_TYPE_OK'); bstate=post('/action',{'action':'browser_state','payload':{}}); R['typing']=c==0 and c2==0 and bstate.get('field')=='AIRI_TYPE_OK'
+    c,_,_=ctl('key','enter'); time.sleep(.3); bstate=post('/action',{'action':'browser_state','payload':{}}); R['keyboard']=c==0 and bstate.get('status')=='AIRI_ENTER_OK'
+    c,_,_=ctl('hotkey','ctrl','shift','a'); bstate=post('/action',{'action':'browser_state','payload':{}}); R['hotkey']=c==0 and bstate.get('status')=='AIRI_HOTKEY_OK'
+    ctl('browser-open',BASE+'/self-test'); time.sleep(.6); bstate=post('/action',{'action':'browser_state','payload':{}}); obs=get('/observe')
+    cb=bstate.get('click_box'); db=bstate.get('drag_box')
+    def ocr_has(item, *terms):
+        t=(item.get('text','') or '').upper().replace(' ','').replace('\n','')
+        return any(term in t for term in terms)
+    ocr_drag=next((i for i in obs.get('ocr',[]) if ocr_has(i,'AIRIDRAGTARGET','DRAGTARGET')), None)
+    if ocr_drag is not None:
+        x=int(ocr_drag['x']+ocr_drag.get('w',0)/2); y=int(ocr_drag['y']+ocr_drag.get('h',0)/2)
+    else:
+        ocr_click=next((i for i in obs.get('ocr',[]) if ocr_has(i,'AIRICLICKTARGET','CLICKTARGET')), None)
+        if ocr_click is None:
+            x=int(db['x']+db['width']/2); y=int(db['y']+db['height']/2)
+        else:
+            screen_off_x=(ocr_click['x']+ocr_click.get('w',0)/2)-(cb['x']+cb['width']/2)
+            screen_off_y=(ocr_click['y']+ocr_click.get('h',0)/2)-(cb['y']+cb['height']/2)
+            x=int(db['x']+db['width']/2+screen_off_x); y=int(db['y']+db['height']/2+screen_off_y)
+    c,_,_=ctl('drag',str(x),str(y),str(x+180),str(y),'0.8'); time.sleep(.3); bstate=post('/action',{'action':'browser_state','payload':{}}); R['drag']=c==0 and bstate.get('status')=='AIRI_DRAG_OK'
+    ctl('key','home'); time.sleep(.2); c,_,_=ctl('scroll','-5'); bstate=post('/action',{'action':'browser_state','payload':{}}); R['scroll']=c==0 and (bstate.get('scroll_y',0)>50 or bstate.get('status')=='AIRI_SCROLL_OK')
+    ctl('browser-open',BASE+'/self-test'); time.sleep(.4); av=post('/act-verify',{'action':'click_element','payload':{'text':'AIRI_CLICK_TARGET'}}); bstate=post('/action',{'action':'browser_state','payload':{}}); R['act_verify']=av.get('ok') is True and av.get('changed_ratio',0)>0 and bstate.get('status')=='AIRI_CLICK_OK'
+    init=post('/mcp',{'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2024-11-05','capabilities':{},'clientInfo':{'name':'airi-selftest','version':'1'}}}); ml=post('/mcp',{'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}}); names=[x['name'] for x in ml.get('result',{}).get('tools',[])]
+    R['mcp_list']=len(names)>=84 and 'computer_mouse_position' in names and 'computer_browser_state' in names and 'computer_browser_auth_save' in names and 'computer_runtime_preflight' in names and 'computer_integrations' in names and 'computer_control_plane' in names
+    mc=post('/mcp',{'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'computer_status','arguments':{}}}); R['mcp_call']=mc.get('result',{}).get('structuredContent',{}).get('ok') is True
+    cp=post('/mcp',{'jsonrpc':'2.0','id':4,'method':'tools/call','params':{'name':'computer_control_plane','arguments':{'action':'status'}}}); cp_payload=cp.get('result',{}).get('structuredContent',{}); R['control_plane']=cp_payload.get('ok') is True and cp_payload.get('capabilities',{}).get('count',0)>=84 and isinstance(cp_payload.get('tasks',{}),dict) and isinstance(cp_payload.get('transactions',{}),dict) and isinstance(cp_payload.get('index',{}),dict) and isinstance(cp_payload.get('skills',{}),dict)
+    coding=subprocess.run([str(ROOT/'.venv/bin/python'),str(ROOT/'scripts'/'airi-coding-selftest')],cwd=str(ROOT),env=ENV,text=True,capture_output=True,timeout=170,check=False)
+    try: cr=json.loads(coding.stdout)
+    except Exception: cr={'ALL':False,'raw':coding.stdout[-5000:],'stderr':coding.stderr[-5000:]}
+    R['coding_agent']=coding.returncode==0 and cr.get('ALL') is True
+    R['coding_context']=cr.get('results',{}).get('context_read',False)
+    R['coding_todo']=cr.get('results',{}).get('task_todo',False) and cr.get('results',{}).get('task_closed',False)
+    R['coding_rollback']=cr.get('results',{}).get('rollback',False)
+    R['coding_atomic_commit']=cr.get('results',{}).get('atomic_commit',False)
+    # Advanced agent services: health/recovery/decisions/persistence/research/scheduler.
+    h=get('/health'); R['health_service']=all(k in h for k in ['gui','workspace','persistence','skills','disk','scheduler'])
+    rec=get('/recovery'); R['recovery_service']='checkpoint' in rec or rec.get('active') is False
+    dr=post('/memory/decision',{'decision':'selftest probe','reason':'advanced service check'}); ds=get('/memory/decisions'); R['decision_memory']=dr.get('decision')=='selftest probe' and ds.get('count',0)>=1
+    ps=get('/persistence/status'); R['persistence_service']=all(k in ps for k in ['persistent','repo','reason'])
+    rr=post('/research',{'topic':'Airi-PC selftest','urls':['https://example.com'],'max_sources':1}); R['research_service']=rr.get('ok') is True and rr.get('source_count')==1 and rr['sources'][0].get('url')
+    sj=post('/scheduler/schedule',{'name':'selftest-health','action':'health','interval_seconds':5}); ss=get('/scheduler'); R['scheduler_service']=sj.get('action')=='health' and any(j.get('name')=='selftest-health' for j in ss.get('jobs',[])); post('/scheduler/cancel',{'name':'selftest-health'})
+    challenge_url='data:text/html,<html><title>Human Check</title><body>CAPTCHA verify you are human</body></html>'
+    ctl('browser-open',challenge_url); hc=get('/browser/human/status'); hw=post('/browser/human/wait',{'timeout':1,'poll':0.25})
+    ctl('browser-open','https://example.com'); hr=post('/browser/human/wait',{'timeout':3,'poll':0.25})
+    R['human_challenge']=hc.get('detected') is True and hw.get('resumed') is False and hr.get('resumed') is True and hr.get('detected') is False
+    print(json.dumps(R,indent=2)); print('ALL=',all(R.values())); return 0 if all(R.values()) else 1
+if __name__=='__main__': raise SystemExit(main())

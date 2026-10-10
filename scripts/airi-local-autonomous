@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+printf '%s\n' 'Airi-PC is ChatGPT-only: local autonomous model execution is disabled.' >&2
+printf '%s\n' 'This compatibility entrypoint does not start a local LLM, contact a remote LLM provider, or start a model gateway.' >&2
+printf '%s\n' 'Use ChatGPT as the reasoning authority and Airi-PC only for execution, verification, persistence, and recovery.' >&2
+exit 78

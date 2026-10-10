@@ -1,0 +1,511 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import time
+from pathlib import Path
+from typing import Any
+
+from .data import _dataset_lock, class_counts, load_records, normalize_label, text_fingerprint
+from .engine import EvolutionConfig, predict_text, run_evolution
+
+ROOT = Path(os.environ.get("AIRI_ROOT") or Path(__file__).resolve().parents[2]).resolve()
+LAB_STATE = Path(os.environ.get("AIRI_EVOLUTION_LAB_STATE") or ROOT / ".ai" / "evolution-lab" / "shadow-router").resolve()
+RAW = LAB_STATE / "raw" / "observations.jsonl"
+DATA = LAB_STATE / "data" / "verified.jsonl"
+META = LAB_STATE / "lab-meta.json"
+FEATURE_SCHEMA = 2
+
+_SECRET_RE = re.compile(
+    r"(?i)(token|secret|password|cookie|authorization|api[_-]?key)\s*[:=]\s*[^\s,;}]+"
+)
+_URL_RE = re.compile(r"https?://\S+", re.I)
+_EMAIL_RE = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b")
+_LONG_NUMBER_RE = re.compile(r"\b\d{5,}\b")
+_PATH_RE = re.compile(r"(?<!\w)(?:[A-Za-z]:\\[^\s]+|/(?:[^\s/]+/)+[^\s]*)")
+
+def ensure_state_boundary() -> Path:
+    workspace = ROOT.resolve(strict=False)
+    resolved = LAB_STATE.resolve(strict=False)
+    if resolved == workspace or workspace not in resolved.parents:
+        raise RuntimeError(f"Evolution Lab state escaped Airi workspace: {resolved}")
+    return resolved
+
+
+
+def _json_read(path: Path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
+def _json_write(path: Path, value: Any) -> None:
+    root = ensure_state_boundary()
+    target = Path(path).resolve(strict=False)
+    if target != root and root not in target.parents:
+        raise RuntimeError(f"Evolution Lab blocked write outside state root: {target}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _bucket(value: int, bounds: tuple[int, ...]) -> str:
+    n = max(0, int(value))
+    for bound in bounds:
+        if n <= bound:
+            return f"le{bound}"
+    return f"gt{bounds[-1]}"
+
+
+def _goal_shape(value: Any) -> str:
+    text = str(value or "")
+    words = re.findall(r"\w+", text, re.UNICODE)
+    lines = text.count("\n") + 1 if text else 0
+    digit_count = sum(ch.isdigit() for ch in text)
+    return ",".join((
+        f"chars:{_bucket(len(text),(32,80,160,320,640,1200))}",
+        f"words:{_bucket(len(words),(5,12,25,50,100,200))}",
+        f"lines:{_bucket(lines,(1,2,5,10,25))}",
+        f"url:{int(bool(_URL_RE.search(text)))}",
+        f"email:{int(bool(_EMAIL_RE.search(text)))}",
+        f"path:{int(bool(_PATH_RE.search(text)))}",
+        f"digits:{_bucket(digit_count,(0,2,8,20,60))}",
+    ))
+
+
+def _arg_shape(args: Any) -> str:
+    if not isinstance(args, dict):
+        return f"kind:{type(args).__name__}"
+    counts: dict[str, int] = {}
+    for value in list(args.values())[:32]:
+        name = type(value).__name__
+        counts[name] = counts.get(name, 0) + 1
+    parts = [f"{name}:{counts[name]}" for name in sorted(counts)]
+    return f"count:{len(args)};" + (",".join(parts) if parts else "none")
+
+
+def route_feature(
+    goal: str,
+    operation: str,
+    tool: str,
+    args: Any = None,
+    candidates: list[str] | None = None,
+) -> str:
+    candidate_names = sorted({str(x)[:120] for x in (candidates or []) if str(x).strip()})[:16]
+    return (
+        f"goal_shape {_goal_shape(goal)} "
+        f"operation {str(operation or 'unknown')[:80]} "
+        f"tool {str(tool or 'unknown')[:120]} "
+        f"arg_shape {_arg_shape(args)} "
+        f"candidates {','.join(candidate_names) or 'none'}"
+    )
+
+def _error_class(error: Any) -> str:
+    text = str(error or "").lower()
+    if not text:
+        return "none"
+    if "timeout" in text or "timed out" in text:
+        return "timeout"
+    if "permission" in text or "forbidden" in text or "scope" in text:
+        return "permission"
+    if "network" in text or "connection" in text or "http" in text:
+        return "network"
+    if "not found" in text or "missing" in text:
+        return "dependency"
+    if "memory" in text or "oom" in text or "killed" in text:
+        return "resource"
+    return "tool_error"
+
+
+def _read_observations() -> list[dict[str, Any]]:
+    if not RAW.exists():
+        return []
+    out = []
+    with RAW.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            try:
+                row = json.loads(line)
+                if (
+                    isinstance(row, dict)
+                    and row.get("feature")
+                    and row.get("label") in (0, 1)
+                    and int(row.get("feature_schema", 0) or 0) == FEATURE_SCHEMA
+                ):
+                    out.append(row)
+            except Exception:
+                continue
+    return out
+
+
+def record_execution(
+    *,
+    goal: str,
+    operation: str,
+    tool: str,
+    args: Any,
+    success: bool,
+    latency_ms: float | None = None,
+    error: Any = None,
+    task_id: str | None = None,
+    node_id: str | None = None,
+    candidates: list[str] | None = None,
+) -> dict[str, Any]:
+    feature = route_feature(goal, operation, tool, args, candidates)
+    stamp = time.time()
+    raw_id = hashlib.sha256(
+        f"{stamp}:{task_id or ''}:{node_id or ''}:{feature}:{bool(success)}".encode("utf-8")
+    ).hexdigest()[:20]
+    row = {
+        "id": raw_id,
+        "feature_schema": FEATURE_SCHEMA,
+        "created_at": stamp,
+        "feature": feature,
+        "feature_id": text_fingerprint(feature),
+        "label": 1 if success else 0,
+        "operation": str(operation or "unknown")[:80],
+        "tool": str(tool or "unknown")[:120],
+        "candidate_count": len(candidates or []),
+        "latency_bucket": (
+            "unknown" if latency_ms is None else
+            "fast" if float(latency_ms) < 250 else
+            "medium" if float(latency_ms) < 1500 else
+            "slow"
+        ),
+        "error_class": _error_class(error),
+    }
+    ensure_state_boundary()
+    RAW.parent.mkdir(parents=True, exist_ok=True)
+    with _dataset_lock(RAW, timeout=5.0, stale_after=900.0):
+        with RAW.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    try:
+        if RAW.stat().st_size > 64 * 1024 * 1024:
+            compact_raw_observations()
+    except OSError:
+        pass
+    return {"ok": True, "recorded": True, "id": raw_id}
+
+
+
+def compact_raw_observations(max_rows: int = 50_000) -> dict[str, Any]:
+    ensure_state_boundary()
+    limit = max(1000, int(max_rows))
+    with _dataset_lock(RAW, timeout=10.0, stale_after=900.0):
+        safe_rows: list[dict[str, Any]] = []
+        total_rows = 0
+        if RAW.exists():
+            with RAW.open("r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    total_rows += 1
+                    try:
+                        row = json.loads(line)
+                    except Exception:
+                        continue
+                    if (
+                        isinstance(row, dict)
+                        and row.get("feature")
+                        and row.get("label") in (0, 1)
+                        and int(row.get("feature_schema", 0) or 0) == FEATURE_SCHEMA
+                    ):
+                        safe_rows.append(row)
+        kept = safe_rows[-limit:]
+        needs_rewrite = total_rows != len(kept) or len(safe_rows) > limit
+        if not needs_rewrite:
+            return {"compacted": False, "rows": len(kept), "purged_legacy": 0}
+        tmp = RAW.with_suffix(".compact.tmp")
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        with tmp.open("w", encoding="utf-8") as handle:
+            for row in kept:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        tmp.replace(RAW)
+    return {
+        "compacted": True,
+        "rows": len(kept),
+        "dropped": max(0, len(safe_rows) - len(kept)),
+        "purged_legacy": max(0, total_rows - len(safe_rows)),
+    }
+
+def prune_lab_storage(max_runs: int = 50, max_history_lines: int = 200) -> dict[str, Any]:
+    root = ensure_state_boundary()
+    removed_runs = []
+    runs = root / "runs"
+    if runs.exists():
+        dirs = sorted(
+            [path for path in runs.iterdir() if path.is_dir()],
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for old in dirs[max(5, int(max_runs)):]:
+            shutil.rmtree(old, ignore_errors=True)
+            removed_runs.append(old.name)
+
+    history = root / "history.jsonl"
+    trimmed = 0
+    if history.exists():
+        lines = history.read_text(encoding="utf-8", errors="replace").splitlines()
+        keep = max(20, int(max_history_lines))
+        if len(lines) > keep:
+            trimmed = len(lines) - keep
+            tmp = history.with_suffix(".tmp")
+            tmp.write_text("\n".join(lines[-keep:]) + "\n", encoding="utf-8")
+            tmp.replace(history)
+
+    return {"removed_runs": removed_runs, "trimmed_history_lines": trimmed}
+
+def _curriculum_profile(rows: list[dict[str, Any]]) -> tuple[dict[tuple[str, str], float], dict[str, Any]]:
+    groups: dict[tuple[str, str], dict[str, int]] = {}
+    for row in rows:
+        key = (
+            str(row.get("operation") or "unknown")[:80],
+            str(row.get("tool") or "unknown")[:120],
+        )
+        group = groups.setdefault(key, {"attempts": 0, "success": 0, "failure": 0})
+        group["attempts"] += 1
+        if normalize_label(row.get("label")) == 1:
+            group["success"] += 1
+        else:
+            group["failure"] += 1
+
+    weights: dict[tuple[str, str], float] = {}
+    ranked = []
+    for key, group in groups.items():
+        attempts = max(1, group["attempts"])
+        success_rate = group["success"] / attempts
+        # Ambiguity is highest when the same route succeeds and fails equally
+        # often. Those are the cases where additional model capacity/data is
+        # most useful. Pure always-success/always-fail groups remain weight 1.
+        ambiguity = 1.0 - abs(2.0 * success_rate - 1.0)
+        evidence_strength = min(1.0, attempts / 12.0)
+        weight = round(1.0 + 1.5 * ambiguity * evidence_strength, 4)
+        weights[key] = weight
+        ranked.append({
+            "operation": key[0],
+            "tool": key[1],
+            "attempts": attempts,
+            "success": group["success"],
+            "failure": group["failure"],
+            "success_rate": round(success_rate, 4),
+            "ambiguity": round(ambiguity, 4),
+            "curriculum_weight": weight,
+        })
+
+    ranked.sort(
+        key=lambda row: (row["curriculum_weight"], row["attempts"]),
+        reverse=True,
+    )
+    return weights, {
+        "version": 1,
+        "method": "verified_outcome_uncertainty_replay",
+        "groups": len(groups),
+        "focus": ranked[:25],
+        "max_weight": max(weights.values(), default=1.0),
+    }
+
+
+def rebuild_dataset(max_observations: int = 20_000) -> dict[str, Any]:
+    ensure_state_boundary()
+    compact_raw_observations()
+    rows = _read_observations()
+    raw_observations = len(rows)
+    if max_observations > 0:
+        rows = rows[-int(max_observations):]
+
+    curriculum_weights, curriculum = _curriculum_profile(rows)
+    _json_write(LAB_STATE / "curriculum.json", curriculum)
+
+    DATA.parent.mkdir(parents=True, exist_ok=True)
+    tmp = DATA.with_suffix(".tmp")
+    positives = 0
+    negatives = 0
+    features = set()
+    with tmp.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            label = normalize_label(row["label"])
+            feature = str(row["feature"])
+            feature_id = str(row.get("feature_id") or text_fingerprint(feature))
+            positives += int(label == 1)
+            negatives += int(label == 0)
+            features.add(feature_id)
+            key = (
+                str(row.get("operation") or "unknown")[:80],
+                str(row.get("tool") or "unknown")[:120],
+            )
+            training_row = {
+                "id": str(row["id"]),
+                "feature_schema": FEATURE_SCHEMA,
+                "text": feature,
+                "text_id": feature_id,
+                "label": label,
+                "source": "airi-shadow-route-observation",
+                "curriculum_weight": float(curriculum_weights.get(key, 1.0)),
+                "evidence": json.dumps(
+                    {
+                        "operation": row.get("operation"),
+                        "tool": row.get("tool"),
+                        "latency_bucket": row.get("latency_bucket"),
+                        "error_class": row.get("error_class"),
+                        "candidate_count": row.get("candidate_count"),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                "added_at": float(row.get("created_at") or time.time()),
+            }
+            handle.write(json.dumps(training_row, ensure_ascii=False) + "\n")
+    tmp.replace(DATA)
+    return {
+        "ok": True,
+        "observations": len(rows),
+        "raw_observations": raw_observations,
+        "unique_route_features": len(features),
+        "success": positives,
+        "failure": negatives,
+        "curriculum": curriculum,
+        "dataset": str(DATA),
+    }
+
+
+def status() -> dict[str, Any]:
+    raw = _read_observations()
+    records = load_records(DATA)
+    counts = class_counts(records)
+    meta = _json_read(META, {})
+    compatible = int(meta.get("feature_schema", 0) or 0) == FEATURE_SCHEMA
+    champion = _json_read(LAB_STATE / "champion" / "metrics.json", None) if compatible else None
+    return {
+        "ok": True,
+        "mode": "shadow_only",
+        "feature_schema": FEATURE_SCHEMA,
+        "champion_compatible": compatible,
+        "isolation": {
+            "production_write_access": False,
+            "network_required_for_training": False,
+            "can_execute_tools": False,
+            "can_modify_router": False,
+            "state_dir": str(LAB_STATE),
+        },
+        "raw_observations": len(raw),
+        "training_records": len(records),
+        "success_records": counts.get("real", 0),
+        "failure_records": counts.get("fake", 0),
+        "unique_route_features": len({row.get("feature_id") for row in raw if row.get("feature_id")}),
+        "last_cycle_raw_count": int(meta.get("last_cycle_raw_count", 0) or 0),
+        "pending_observations": max(0, len(raw) - int(meta.get("last_cycle_raw_count", 0) or 0)),
+        "champion": champion,
+        "curriculum": _json_read(LAB_STATE / "curriculum.json", None),
+        "last_cycle": meta.get("last_cycle"),
+    }
+
+
+def run_cycle(
+    *,
+    population: int = 6,
+    generations: int = 2,
+    candidate_epochs: int = 1,
+    finalist_epochs: int = 2,
+) -> dict[str, Any]:
+    ensure_state_boundary()
+    rebuilt = rebuild_dataset()
+    if rebuilt["observations"] < 40 or rebuilt["unique_route_features"] < 12 or min(rebuilt["success"], rebuilt["failure"]) < 4:
+        result = {
+            "ok": True,
+            "trained": False,
+            "reason": "insufficient_balanced_shadow_observations",
+            "dataset": rebuilt,
+        }
+        _json_write(META, {
+            **_json_read(META, {}),
+            "feature_schema": FEATURE_SCHEMA,
+            "last_cycle_raw_count": rebuilt["raw_observations"],
+            "last_cycle": result,
+            "updated_at": time.time(),
+        })
+        return result
+
+    cfg = EvolutionConfig.for_mode(
+        "safe",
+        population=max(4, min(12, int(population))),
+        generations=max(1, min(5, int(generations))),
+        candidate_epochs=max(1, min(3, int(candidate_epochs))),
+        finalist_epochs=max(1, min(4, int(finalist_epochs))),
+        vocab_size=4096,
+        max_params=500_000,
+        max_latency_ms=25.0,
+        promotion_repeats=2,
+        min_promotion_votes=1,
+        min_f1_first_champion=0.55,
+        abstain_threshold=0.65,
+    )
+    result = run_evolution(LAB_STATE, cfg)
+    meta = _json_read(META, {})
+    meta.update({
+        "feature_schema": FEATURE_SCHEMA,
+        "last_cycle_raw_count": rebuilt["raw_observations"],
+        "last_cycle": {
+            "run_id": result.get("run_id"),
+            "promoted": result.get("promoted"),
+            "promotion_reason": result.get("promotion_reason"),
+            "candidate": result.get("candidate"),
+            "completed_at": time.time(),
+        },
+        "updated_at": time.time(),
+    })
+    _json_write(META, meta)
+    storage = prune_lab_storage()
+    return {"ok": True, "trained": True, "dataset": rebuilt, "evolution": result, "storage": storage}
+
+
+def score_candidates(
+    goal: str,
+    operation: str,
+    candidates: list[str],
+    args: Any = None,
+) -> dict[str, Any]:
+    meta = _json_read(META, {})
+    champion = LAB_STATE / "champion" / "model.pt"
+    if int(meta.get("feature_schema", 0) or 0) != FEATURE_SCHEMA:
+        return {
+            "ok": False,
+            "available": False,
+            "reason": "champion_requires_privacy_safe_retraining",
+            "candidates": [],
+            "shadow_only": True,
+        }
+    if not champion.exists():
+        return {
+            "ok": False,
+            "available": False,
+            "reason": "no_shadow_champion",
+            "candidates": [],
+            "shadow_only": True,
+        }
+    scored = []
+    for tool in list(candidates or [])[:32]:
+        feature = route_feature(goal, operation, tool, args, candidates)
+        pred = predict_text(LAB_STATE, feature, vocab_size=4096)
+        scored.append({
+            "tool": tool,
+            "success_probability": float(pred["real_probability"]),
+            "failure_probability": float(pred["fake_probability"]),
+            "confidence": float(pred["confidence"]),
+            "label": (
+                "uncertain" if pred["label"] == "uncertain"
+                else "likely_success" if pred["label"] == "likely_real"
+                else "likely_failure"
+            ),
+        })
+    scored.sort(key=lambda row: row["success_probability"], reverse=True)
+    return {
+        "ok": True,
+        "available": True,
+        "shadow_only": True,
+        "warning": "Advisory only: this ranking is never used to execute or select tools automatically.",
+        "candidates": scored,
+    }

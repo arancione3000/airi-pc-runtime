@@ -1,0 +1,10 @@
+{
+  "deprecated": true,
+  "replaced_by": "config/AIRI_REASONING_POLICY.json",
+  "architecture": "chatgpt-default-qualified-local-optional",
+  "default_reasoning_authority": "chatgpt",
+  "allow_qualified_local_generalist": true,
+  "allow_arbitrary_local_llm": false,
+  "allow_remote_llm": false,
+  "note": "Retained only for compatibility with older bootstrap references. New code must load AIRI_REASONING_POLICY.json."
+}

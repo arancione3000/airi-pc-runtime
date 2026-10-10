@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Airi Control</string>
+    <string name="airi_control_accessibility_description">Consente ad Airi di eseguire tocchi, scorrimenti e comandi soltanto durante una sessione avviata manualmente.</string>
+</resources>

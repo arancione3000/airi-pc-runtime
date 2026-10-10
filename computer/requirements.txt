@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+pyautogui
+pytesseract
+python-xlib
+Pillow
+playwright
+mss
+cryptography>=44
+
+# Proof-gated MATHESIS-Ω runtime.
+-r mathesis/requirements.txt
+httpx
+httpx2
+requests

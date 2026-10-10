@@ -1,0 +1,3 @@
+# Core Airi-PC runtime dependencies.
+# Keep the detailed core dependency list in computer/requirements.txt.
+-r computer/requirements.txt

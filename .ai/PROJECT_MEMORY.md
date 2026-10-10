@@ -1,0 +1,460 @@
+# Airi-PC Project Memory
+
+## 2026-09-19 — MATHESIS-Ω v0
+
+Scope: add a separate proof-gated mathematical agent without weakening Airi-PC
+runtime or Evolution Lab security boundaries.
+
+Design decisions:
+- natural-language interpretation is advisory; mathematical truth is proof-gated;
+- safe AST-to-SymPy IR, independent SymPy/Z3/Lean checks, adversarial counterexamples;
+- restricted program-synthesis arena with reference/property tests;
+- pure-Python growing neural router is advisory only;
+- web access is HTTPS read-only through Airi's hardened researcher;
+- self-evolution rewrites only architecture/router state, never verifier-kernel files;
+- candidate/champion promotion requires benchmark improvement and kernel-integrity checks;
+- autonomous state persists on a dedicated `mathesis-state` Git branch;
+- hourly continuum plus independent stale-heartbeat watchdog.
+
+The feature must be merged only after the dedicated MATHESIS CI and end-to-end
+tests pass.
+
+
+## 2026-09-19 — MATHESIS-Ω v1 autonomous discovery
+
+- broadened safe SymPy IR with assumptions and whitelisted mathematical functions;
+- added multi-domain symbolic laboratory;
+- added bounded conjecture discovery with internally-novel/human-novelty separation;
+- added exact Faulhaber-style discovery using interpolation + finite-difference proof obligations;
+- added rotating HTTPS read-only mathematical curriculum;
+- architecture genome now evolves topology, symbolic depth, discovery beam and research budget;
+- architecture arena evaluates multiple challengers per cycle;
+- intent router now understands calculus, symbolic analysis and discovery requests;
+- old router shapes are migrated by retraining when the intent vocabulary changes;
+- fast continuum scheduled every five minutes with a duplicate-aware watchdog every ten minutes;
+- deep theorem workflow uses Lean 4.34.0 and Mathlib 4.34.0;
+- all discovery/curriculum histories are bounded to avoid unbounded persistent-state growth;
+- no result may be called new to humanity automatically; only new to MATHESIS state.
+
+
+## 2026-09-19 — MATHESIS experience feedback + anti-forgetting
+
+- added an auditable ExperienceAnalyzer;
+- discoveries and curriculum coverage now generate bounded architecture-search hints;
+- challenger generation diversifies across different observed weaknesses;
+- experience-derived priorities are considered before generic benchmark gaps;
+- verified relation-style discoveries become critical replay tests for all future champions;
+- a candidate that forgets previously verified mathematical relations cannot be promoted;
+- web/research evidence still cannot directly edit the verifier kernel;
+- five-minute continuum cron uses an explicit minute list plus duplicate-aware watchdog.
+
+
+## 2026-09-19 — MATHESIS continuous self-handoff
+
+- continuum no longer depends only on GitHub cron;
+- each completed main-branch cycle waits to the five-minute cadence and dispatches its successor;
+- handoff checks queued/in-progress runs to avoid duplicate chains;
+- cron and watchdog remain independent recovery paths;
+- workflow has explicit Actions write permission for workflow_dispatch;
+- verified discovery-domain gaps persist until the corresponding expert is acquired;
+- read-only curriculum cadence increased so research occurs roughly every 15 minutes at research_budget=2;
+- external GitHub outages/limits remain outside the repository's ability to guarantee zero downtime.
+
+
+## 2026-09-19 — MATHESIS domain-closure invariant
+
+- fixed a feedback-loop gap where curriculum could request a polynomials expert that architecture could not build;
+- added polynomials to evolvable experts;
+- added algebra/polynomial domain benchmarks;
+- CI now requires every SymPy lab domain to be representable by the architecture expert set.
+
+
+- fixed symbolic-depth scoring to use the explicit symbolic-depth proof result rather than a fragile positional task index;
+- added regression coverage showing anti-forgetting theorem failures cannot corrupt the reported verified symbolic depth.
+
+
+- legacy Faulhaber discoveries are now re-proved with the new nontrivial induction obligation;
+- successful legacy proofs are upgraded in place; failed reproofs are archived out of the active theorem corpus;
+- quality migration persists immediately even if the current discovery cycle finds no new candidate.
+
+
+- curriculum no_sources/research_error retries now remain on the same mathematical domain;
+- successful retry clears the per-domain retry counter;
+- after three failures the curriculum advances to avoid permanent source-induced stalls.
+
+
+## 2026-09-20 — MATHESIS handoff network hardening
+
+- added explicit connect/total timeouts and retries to continuum, watchdog and deep-Mathlib GitHub API calls;
+- raised the continuum job timeout margin to 15 minutes so cold setup plus persistence/handoff cannot be killed prematurely;
+- CI now enforces that autonomous workflow API calls remain time-bounded and retrying.
+
+
+- if active-run lookup fails after bounded retries, continuum attempts one serialized continuity dispatch;
+- watchdog converts bounded run-list lookup failure into a stale recovery condition instead of crashing before recovery.
+
+
+## 2026-09-20 — Structured anti-forgetting + persistent-state Health Gate
+
+- structured anti-forgetting now replays verified Faulhaber induction recurrences;
+- rich sum-of-powers discoveries contribute critical future promotion obligations even when the full quantified theorem string is outside the simple relation parser;
+- persistent curriculum v1 metadata migrates in-memory to schema v2 with retry counters;
+- added a persistent-state Health Gate before every autonomous state push;
+- health checks architecture/domain closure, topology, router compatibility, discovery proof quality, Faulhaber certificates, curriculum retry bounds, benchmark failures and kernel/verifier status;
+- failed health audits cannot replace the previous known-good `mathesis-state` checkpoint.
+
+
+## 2026-09-20 — MATHESIS independent proof-integrity audit
+
+- persistent `verified` metadata is no longer trusted by health or anti-forgetting;
+  active relation discoveries are re-verified with the current CompositeVerifier;
+- Faulhaber migration now checks that theorem text, exponent and stored
+  polynomial agree before rebuilding base case, bounded exact samples and the
+  structurally nontrivial finite-difference recurrence;
+- legacy Faulhaber sample counts are capped during reproof, failed reproofs are
+  archived, schema-v3 upgrades persist even without theorem moves, and the
+  migration is idempotent;
+- legacy non-Faulhaber discoveries missing the current proof-quality gate are
+  re-proved or archived; structural tautologies keep their explicit discard
+  classification;
+- anti-forgetting accepts only currently valid active proof obligations,
+  replays the complete active corpus by default (not a 16-theorem window), and
+  ignores discarded, unverified, certificate-invalid or currently disproved
+  rows;
+- discovery novelty now distinguishes memory novelty from source novelty and
+  human novelty; source/human novelty remain unassessed automatically;
+- architecture benchmarks and persistent health now reject duplicate/unknown
+  experts or strategies, disconnected nodes, bad topology, unknown proof-order
+  methods, broken research-strategy coupling and out-of-bound genome parameters;
+- CI exercises every SymPy domain through study signal -> weakness -> challenger
+  -> expert/topology -> real domain benchmark, including polynomials;
+- evolution challenger selection now filters hard-gate-ineligible candidates
+  before score selection;
+- interactive evolution preserves promoted symbolic-depth and discovery-beam
+  settings immediately when rebuilding the discovery engine;
+- self-rewrite path validation is a strict direct-file whitelist: nested state
+  paths, unknown files, the state root and external paths are rejected;
+- the Deep Mathlib smoke suite includes a nontrivial Faulhaber
+  finite-difference obligation;
+- continuum state writers remain serialized by the GitHub concurrency group,
+  health runs before persistence and state pushes are non-force pushes;
+- persistent-state health now fails closed on an unreadable champion and on
+  malformed discovery/curriculum object or numeric fields, rather than
+  silently validating fallback defaults or crashing;
+- real continuum logs were observed carrying persistent discovery state across
+  consecutive cycles and self-dispatching the successor; GitHub availability
+  remains an external best-effort dependency.
+
+
+## 2026-09-20 — AIRI Generalist LM foundation
+
+A new general-purpose generative-model layer is being added behind Airi-PC.
+
+Architecture decisions:
+- the generalist model is a real decoder-only causal Transformer, separate from
+  the old factual classifier and separate from MATHESIS-Ω;
+- MATHESIS remains a proof-gated research/evolution signal source, not the user-
+  facing language model and not a direct source of LM truth or weights;
+- the mutable GeneralistGenome is bounded to architecture/training/reasoning
+  parameters and adapters; verifier, permissions, tool execution policy,
+  qualification and host boundaries remain outside the mutable genome;
+- benchmark domains are separated into language, coding, data, reasoning,
+  structured output and tool protocol so aggregate score cannot hide protected-
+  domain regressions;
+- supervised fine-tuning masks prompt tokens and optimizes assistant targets;
+- tool calls are parsed as allowlisted JSON requests and are executed only by an
+  injected Control Plane executor; unknown tools never reach execution and the
+  agent loop has a hard step cap;
+- a local checkpoint is not a production reasoning provider just because
+  weights exist: config/weights/metadata/benchmark must be complete, benchmark
+  qualification must be bound to the exact checkpoint SHA-256 digest, and both
+  AIRI_GENERALIST_ENABLE=1 and AIRI_GENERALIST_PREFER=1 are required before the
+  model can be preferred over ChatGPT;
+- vision remains routed to ChatGPT until a separately benchmarked local vision
+  model exists;
+- already-downloaded Hugging Face causal models may be benchmarked locally via
+  LocalTransformersBackend, using local_files_only=True and
+  trust_remote_code=False. Autonomous model-code downloads are not allowed.
+
+Capability honesty:
+- CI uses a deliberately tiny model to prove causal generation, SFT learning,
+  checkpointing and gating mechanics;
+- no claim is made that the tiny CI model is GPT/Claude-class;
+- useful general capability requires high-quality pretrained weights or
+  substantial pretraining/fine-tuning plus a much broader held-out benchmark.
+
+## 2026-09-20 — AIRI Generalist LM foundation
+
+- added a real decoder-only causal Transformer layer for general-purpose language generation rather than reusing the factual classifier as a chatbot;
+- added reversible versioned tokenization, chat serialization, autoregressive generation, supervised fine-tuning, checkpointing and local open-weight Transformers support with local-files-only loading and remote-code trust disabled;
+- generalist capability is benchmarked separately across language, coding, data, reasoning, tool protocol and structured output;
+- added a bounded GeneralistGenome with real architectural variants and research signals; MATHESIS can influence research directions only through proof-gated signals and cannot directly create trusted LM outputs or weights;
+- added a persistent H24 generalist research continuum with serialized state writers, watchdog recovery, held-out validation and anti-forgetting;
+- added a bounded Generalist Agent whose model can request only explicitly allowlisted tools; current integrated tools are read-only or computational;
+- added an exact-digest qualification gate for native and local Transformers checkpoints, plus an authenticated local OpenAI-style model gateway;
+- Airi-PC keeps ChatGPT as the default reasoning authority. A local Generalist provider appears only with an explicitly enabled, exact-digest qualified checkpoint; preference for it is a separate opt-in;
+- added research-to-production promotion: a changed research champion is qualified once per digest, compared to the previous production champion with protected-domain anti-regression, atomically swapped, post-swap reverified and rolled back on integrity failure;
+- research and production promotion logic remain outside the evolvable genome.
+
+- Generalist autocoding now requires an explicit declared file scope and an explicit real test command; generated edits remain behind snapshot/rollback/diff/guardrail checks.
+- Generalist data analysis now has bounded deterministic table profiling and aggregate/group-by tools in addition to calculator/basic statistics, without arbitrary code execution.
+
+
+## 2026-09-20 — AIRI Generalist continual-learning hardening
+
+- Generalist research now persists a bounded curriculum replay memory inside the Generalist state branch;
+- every cycle adds mechanically labeled, validation-disjoint examples across language, coding, data, reasoning, tool calling and structured output;
+- a dedicated continual-learning challenger starts from the current champion weights, allowing knowledge to accumulate without requiring an architecture mutation;
+- architecture challengers remain independent and train with the same persistent replay corpus;
+- research promotion now checks real autoregressive held-out generation in addition to teacher-forced loss/accuracy;
+- generated held-out items that a champion already solves become anti-forgetting obligations;
+- research health fails closed if persistent curriculum replay overlaps protected validation prompts or if generation metrics are malformed;
+- persistent curriculum size is bounded by `AIRI_GENERALIST_RESEARCH_CURRICULUM_MAX_ROWS` (default 1200);
+- MATHESIS signals still only influence research direction; they do not directly write Generalist weights or bypass independent promotion gates.
+
+
+## 2026-09-20 — Generalist architecture inheritance and replay integrity
+
+- architecture challengers inherit only exact-name/exact-shape champion state
+  tensors before fine-tuning; transfer coverage is persisted in research
+  metrics;
+- the Generalist DSL now permits learned, sinusoidal, and RoPE positional
+  encoding, with RoPE constrained to even attention-head dimensions;
+- rotating canary examples stay outside training and gate promotion against
+  validation memorization;
+- persistent curriculum rows are digest-bound and fail closed on malformed
+  rows, invalid domains, duplicates, cap violations, or validation overlap;
+- no architecture or continual-learning path can edit verifier, qualification,
+  Control Plane permissions, host boundaries, workflow permissions, or secret
+  handling.
+
+
+## 2026-09-20 — AIRI Generalist LM foundation
+
+- Added a real decoder-only causal Transformer with autoregressive generation,
+  SFT, checkpointing and versioned byte tokenizer.
+- Added independent generalist capability gates for language, coding, data,
+  reasoning, tools and structured output; production qualification v2 uses a
+  protected 21-task suite disjoint from autonomous training/replay curricula.
+- Added persistent continual-learning research with rotating canaries,
+  autoregressive validation, anti-forgetting, bounded architecture evolution,
+  compatible weight inheritance, self-handoff and watchdog recovery.
+- Added optional exact-digest local Transformers/Open-Weight backend with
+  `local_files_only=True` and `trust_remote_code=False`.
+- Added bounded model/tool agent loop, safe data profiling/aggregation and
+  scoped coding proposals that require explicit scope, tests, rollback and
+  guardrails; the model cannot modify the Generalist kernel/governance paths.
+- The MATHESIS -> Generalist bridge now re-proves persisted mathematical rows
+  with the current verifier before emitting architecture signals and fails
+  closed if that verifier is unavailable.
+- Generalist read-only workspace tools exclude sensitive files/paths and enforce
+  file/search traversal budgets.
+- Added opt-in `AIRI_GENERALIST_SYNC_FROM_GITHUB=1` deployment sync. It fetches
+  the dedicated state branch, locally re-runs protected production
+  qualification, and transactionally swaps the local checkpoint with rollback.
+  Research promotion never silently enables or prefers the local provider.
+
+
+## 2026-09-20 — Generalist scalable-learning tranche
+
+- the autonomous Generalist Research Continuum remains a bounded small-model
+  architecture/curriculum laboratory; it is not represented as a substitute
+  for large-scale foundation-model training;
+- added reviewed-local-corpus causal pretraining with explicit allowed roots,
+  symlink/path confinement, suffix/file/total-byte budgets, SHA-256
+  deduplication and checkpoint provenance;
+- added response distillation from an already-local teacher backend; teacher
+  generations are SFT proposals only and cannot bypass held-out qualification;
+- added optional local-only Transformers + PEFT LoRA training for already
+  downloaded open-weight causal LMs, with `local_files_only=True`,
+  `trust_remote_code=False`, bounded hyperparameters and no base-model
+  overwrite;
+- exposed explicit CLI commands for native pretraining, local-teacher
+  distillation and local LoRA;
+- every scalable-learning output remains unqualified until it passes the
+  independent Generalist protected benchmark and production promotion gates;
+- CI regressions verify corpus confinement/deduplication, actual causal-loss
+  reduction, distillation provenance semantics and LoRA path/config boundaries.
+
+
+## 2026-09-20 — Generalist LM scalable execution integration
+
+- integrated the KV-cache/scalable-training work on top of the already-merged causal pretraining, distillation and local-LoRA tranche rather than force-merging a stale conflicting PR;
+- autoregressive decoding now has a bounded per-layer KV cache with equivalence regressions against full-prefix greedy decoding and context-limit fallback;
+- SFT supports bounded gradient accumulation and fp32/bf16/fp16 policies with fail-closed device checks;
+- qualification, protected-domain promotion gates, Airi-PC permissions and the MATHESIS verifier boundary remain unchanged.
+
+
+## 2026-09-20 — Grounded Generalist repository learning
+
+- added a deterministic bounded repository corpus builder for Generalist causal
+  pretraining;
+- tests, Generalist benchmark/qualification/promotion/governance files,
+  persistent state, .ai internals and sensitive paths are excluded from
+  training to prevent evaluation leakage and secret ingestion;
+- symlink escapes are rejected and common token/private-key patterns are
+  redacted from otherwise permitted source files;
+- repository traversal prunes blocked directories before descent instead of
+  scanning them and discarding afterward;
+- causal-pretraining evaluation uses a deterministic bounded block subset so a
+  larger grounded corpus cannot explode autonomous cycle runtime;
+- bootstrap, continual-learning and architecture-challenger paths all receive
+  the same optional grounded-pretraining stage;
+- the Generalist H24 continuum uses a bounded repository corpus and a small
+  number of pretraining steps; production qualification remains independent.
+
+
+## 2026-09-20 — Generalist BPE tokenizer foundation
+
+- added deterministic bounded `bpe-v1` training over the reversible byte
+  vocabulary, preserving all existing chat-role special tokens;
+- BPE merge files include a stable digest and reject invalid forward references,
+  special-token merges, duplicate pairs and tampered metadata;
+- Generalist runtime can persist/load BPE tokenizer artifacts while remaining
+  backward-compatible with existing `byte-v1` checkpoints;
+- BPE checkpoint qualification includes `tokenizer.json` in the exact artifact
+  digest, so tokenizer changes invalidate prior qualification;
+- the autonomous genome still permits only `byte-v1` for now; BPE is not
+  considered an active evolutionary capability until a fair migration and
+  benchmark path is implemented.
+
+
+## 2026-09-20 — Generalist domain-balanced retention
+
+- observed real persistent curriculum skew (for example reasoning/coding history
+  outnumbering language rows) after grounded repository pretraining;
+- added deterministic domain balancing to the base SFT replay so accidental
+  curriculum-frequency skew cannot silently become a forgetting pressure;
+- explicit genome focus genes are applied after the neutral balanced replay,
+  preserving intentional specialization while protecting the generalist base;
+- promotion thresholds and per-domain/canary anti-forgetting gates are
+  unchanged.
+
+
+## 2026-09-20 — Generalist tokenizer evolution fairness
+
+- promoted `bpe-v1` from checkpoint-only support into the bounded Generalist
+  architecture-search surface;
+- BPE training uses only allowed training/replay and protected repository-corpus
+  material, never validation/canary/production-qualification rows;
+- byte -> BPE challengers inherit stable byte/special embeddings exactly and
+  initialize new merged-token embeddings deterministically from their source
+  byte embeddings;
+- research resource checks count the actual tokenizer vocabulary size;
+- cross-tokenizer promotion uses NLL/bits per supervised UTF-8 target byte,
+  because per-token cross-entropy and token accuracy are not comparable across
+  different segmentations;
+- held-out generation, per-domain byte-normalized quality, rotating canaries
+  and solved-item anti-forgetting remain mandatory.
+
+
+## 2026-09-23 — 50M language rehabilitation before causal continuation
+
+- the live single lineage `airi-5d3d25177d2e83f7` had reached 50,041,536
+  parameters and 31,864,877 accepted causal tokens, but seven consecutive
+  language-guard rollbacks showed that generic short-sentence causal recovery
+  could no longer make valid progress;
+- Phase 5 now runs a transactional three-stage Italian/English elementary
+  rehabilitation before further causal training whenever the live checkpoint
+  is pathologically repetitive or below its durable language anchor;
+- every stage mixes balanced reviewed elementary rows with the digest-verified,
+  training-only replay, structurally excludes Phase-5 probes and held-out SFT,
+  and uses target-safe repetition unlikelihood plus EOS pressure;
+- progressive repetition, elementary-language, short-dialogue and protected-
+  replay gates select a stage checkpoint; failed attempts restore the exact
+  pre-stage checkpoint and do not add valid tokens;
+- accepted supervised tokens are counted exactly and separately from causal
+  tokens; `valid_tokens_processed` is their sum and the checkpoint audit fails
+  its invariant if accounting, lineage preservation or rollback evidence is
+  inconsistent;
+- `Ciao`, `Come ti chiami?`, simple Italian/English prompts and dialogue remain
+  held out for diagnosis and are never copied into rehabilitation training.
+
+
+## 2026-09-24 — Protected causal continual training
+
+- the healthy 50M R2 lineage advanced to 32,815,853 accepted causal tokens, but
+  then produced ten consecutive guarded rollbacks (764,032 attempted tokens,
+  zero accepted), showing that smaller segments and the 1/64 LR floor alone
+  could not prevent causal forgetting;
+- every causal step now keeps new data dominant while mixing a bounded 10–20%
+  training-only bilingual/dialogue replay and a frozen pre-segment forward-KL
+  trust region; held-out SFT and Phase-5/conversational probes remain excluded;
+- AdamW uses fresh bounded momentum (`betas=(0.9, 0.95)`), a short per-segment
+  warmup and discriminative rates: full LR for the widened FFN, lower rates for
+  embeddings, attention/norms and the LM head; migration resets incompatible
+  optimizer state once and rollback retries remain fresh;
+- segment growth is progressive (about 32k -> 64k -> 125k -> 250k -> 500k)
+  only after consecutive accepted checkpoints, and any rejection resets the
+  streak immediately;
+- the previously double-escaped Unicode word regex counted non-word spans and
+  made `multiword_output_rate` noisy. It is corrected and the durable anchor is
+  re-evaluated from `language-guard-best` under the expanded 14-probe suite;
+- the 100M tier now targets 32M reviewed unique corpus tokens (up from 20M), and
+  learning-efficiency telemetry records attempts, acceptance/rollback rates,
+  replay/new tokens, quality deltas, accepted tokens/hour, checkpoint time and
+  periodic training-excluded conversational traces.
+
+
+## 2026-09-24: bounded causal recovery experiment after #182
+
+Scope: Generalist training duration, telemetry and tests only. Dynamic baseline at task start: 32,815,853 causal / 32,821,507 valid tokens; lineage airi-5d3d25177d2e83f7, 50,041,536 parameters. Initially 11 protected attempts and zero accepted; continuation observed 27/0.
+
+Controlled local diagnostics used the actual candidate and training-only persisted replay as a causal sample, not fresh full corpus. Baseline reproduced exactly: NLL 2.054368900679231, repetition .25353717698973643. Weighted replay gradient ~3.7 versus causal ~4.1; nominal replay token percentage does not measure its optimizer pressure. KL from live reference starts at zero. Anti-repetition .02/.10/.20 and causal KL .5 gave essentially identical two-step generations. FFN .5/.25 improved micro output, but FFN .5 failed unchanged guard at 16k.
+
+Unmodified objective/batch32: 8,128 tokens gave NLL 2.0422212, repetition .2294508, multiword/nonempty 1, pathological false; 16,256 gave NLL 2.0169244, repetition .2994937, gate rejected. Hypothesis: accept bounded useful prefixes instead of discarding them after a longer drift. Only recovery duration changes: 8k, then 16k/32k after actual successive acceptances. All quality thresholds remain unchanged. Local workspace reset lost uncommitted raw experimental files; these are observed results transcribed from tool outputs, not claimed reproducible fresh-corpus proof. Live collation and full CI remain required.
+
+
+## 2026-09-30 — Learning efficiency v3: negative controlled evidence
+
+Scope: read-only live audit, offline same-checkpoint benchmark, regression tests and report; no production policy or live state changes. Pinned main 532b2b81d50e288ff8a759efe8722e95acaad8dc, state 83d735f392c91163cade8746cccbbcc574d52724. Baseline accepted 92,838.76/h (training-only), rollback 391/466 (83.91%), repetition .236157526 vs durable .157720580, remaining hard-boundary headroom .001563054. All 32 retained rejections crossed durable repetition. Nominal replay .80 is loss weighting (4x), not token fraction; measured weighted replay/causal CE gradient ratio 34.18 on one microbatch despite ~1% replay token count. Source training-only replay has limited coverage; cannot represent full fresh corpus or heldout validation.
+
+Initial 16 exploratory trials incorrectly used genome LR .0001; explicitly invalid for success. Correct workflow LR .0003: all 14 controlled 8k/16k trials rejected, including proportional replay, exact gradient balance, SGD, prefix acceptance and durable causal KL500. SGD broad lowered NLL ~.04 while repetition reached .353. No >=3x or stable8k/16k evidence, no policy promoted. Four ~50M wider geometry migration probes transferred only two tensors and failed pathological repetition: existing transfer is not function preserving across width change, not proof wider architectures are intrinsically worse.
+
+New offline audit/benchmark verifies source immutability, records real token/gradient contributions, gate decisions, hashes and timings, crash-safe journal/config-aware resume. Artifacts and detailed limitations in reports/generalist-learning-efficiency-v3/REPORT.md. Regression suite 227 passed/1 optional-backend skip. Keep feature draft; do not deploy an empirically failing candidate or relax gates.
+
+## 2026-10-01 — Learning efficiency continuation: isolated successes falsified
+
+Scope remains offline tools, tests and evidence; no production or live state writes. New pinned state f5c4c334afbef2c8437ffd9a26efee5ac517cd1d: causal33,173,485, accepted79/491, rollback412; repetition unchanged .236157526 with .001563054 headroom. Original task baseline92,838.76/h remains the improvement denominator. Exact English CC0 and human OASST raw pins recovered (60,180 train/3,146 validation docs); changed rolling Italian and unavailable FineWeb excluded. Subset validation is neither full live validation nor necessarily historically unseen.
+
+38 independent controlled trials plus three sustained sequences. Stronger teacher-forced anti-repetition, FFN projection localization and down-rate reduction fail. Some frozen-FFN or generated-negative-only autoregressive trials pass8k, but no headroom gain. Embedding strategy sequence accepted8k twice, rejected16k twice (~147,275/h end-to-end,50% rollback). AR10 and balanced plain-causal replay20% plus AR.1/eight train prefixes each accepted only first8k then rejected next8k/16k/32k. These observations falsify isolated-success claims. Plain replay gradient locally ~1.05 versus causal2.46 and auxiliary3.87, much more balanced than elementary SFT; still not sustained efficiency.
+
+Cross-format split audit finds33 broad SFT train rows matching corpus-validation text (elementary pool0; corpus train/doc validation overlap0). Offline harness excludes these without altering evaluation sets; earlier broad-SFT subset-validation gains are not trusted. Production split remains unchanged and needs a separately tested training-only exclusion fix. Added parameter freezing before optimizer, actual plain replay accounting, generated holdout filtering, accepted-only offline checkpoint chains, validation hashes and proximal immutable-anchor experiments. 251 passed/1 optional skip. See reports/generalist-learning-efficiency-v3/resume-2026-10-01/REPORT.md and compressed journals. No3x, headroom or stable16k evidence; keep PR200 draft and investigate further.
+
+Proximal immutable-anchor ablation: 4/5 rejected; strongest decay repetition .307 despite smaller distance to healthy weights. One plain replay+AR combination accepted8k with unchanged headroom, not validated. Do not equate parameter proximity with functional language health.
+
+## 2026-10-01 — Further diagnostics and environment interruption
+
+Scope expands to the proven cross-format holdout integrity defect: keep every corpus/SFT validation row, exclude normalized held-out response identities from causal training targets and all SFT contexts. Manifest reports exclusions; source pins, anchor, gates and persistent token counters do not change. Feature only, not merged. The local execution environment disconnected during the extended suite and reports environment_offline. Last complete local suite before this data fix:259 passed/1 optional skip. The data fix and reconstructed source must be verified remotely; do not claim local suite completion.
+
+Further observed experiments after published539f6d: EOS weighting and proximal healthy-weight interpolation do not create headroom. Healthy-reference KL on training-prefix generated paths at weight1 accepted first8k (repetition .236080566), then second8k rejected (.241998137); stop before16k. Lower KL.3 plus generated-negative objective.1 accepted one8k, NLL delta-.001162, subset-validation delta-.000365, but headroom unchanged and sequence not yet verified. Stronger KL/rates and replay-prefix KL variants rejected. Full journals after539f6d cannot currently be retrieved from the offline environment; these are observed diagnostics, not a reproducibility claim.
+
+Language-specific analysis: recovered short curriculum42,352 English/121 Italian documents. Baseline Italian mean repetition .315504 -> .365687; English .093333 unchanged. Latest pinned live rejection Italian .315504 -> .342901, English unchanged. This identifies where the symptom occurs, not the cause of the live sampling distribution. Main cache may recover the exact pinned Italian/FineWeb sources via an isolated read-only GitHub job; do not silently treat the changed Italian export as the original source. Next architecture-dynamics hypothesis: freeze expanded FFN coordinates while training original1888-wide core (source width from language-rehabilitation.json), preserving all frozen weights/moments. This complements, rather than repeats, the failed historical residual-only recovery; it remains unvalidated.
+
+## 2026-10-03 — Quality-gated token transaction ramp
+
+User scope: inspect live attempted/accepted throughput, improve automatic growth toward 100k accepted tokens per real hour, preserve learning quality and the current lineage. Snapshot e217df0 reports33,250,701 causal tokens and16,256 last accepted; historical94,523 accepted/hour is compute-only. One-hour observed window accepted16,256. Fixed workflow batch contract for protected32/64/128 and bounded automatic retry continuation; kept explicit one-shot canaries. Added16,256->32,512->65,024 transactions at constant batch128/LR1/128 after three improving acceptances per rung and anchor+0.04 repetition headroom. Rollback/flat or worsening NLL resets growth proof. Added recent calendar counters with unknown first start excluded. No runtime state edited.267 passed/1 optional skip, compile and diff checks passed. No live100k/hour or higher-rung learning claim. See reports/generalist-token-ramp/REPORT.md.
+
+## 2026-10-03 — Remove repeated reviewed-corpus preparation
+
+User requests faster training. Main c24c66f/run37127825887 spends11–13min per segment despite restored source/packed caches; actual training30–70s. Scope: bootstrap data preparation/cache helper, preparation telemetry, bootstrap/Generalist CI and tests/report. Added exact reviewed JSONL bundle reuse bound to raw sources, metadata, persisted manifest/pins, quota, full tokenizer merges and code hashes; payload/document/manifest integrity and split counts checked. Cold path and all quality/token gates unchanged; source/state checkpoints are not manually changed. Independent Actions cache publishes prepared bundles across runs.278 passed/1 optional skip; warm-path equivalence and invalidation tests included. First full build remains cold; actual production speedup is pending measurement. Report: reports/generalist-prepared-bundle/REPORT.md.
+
+## 2026-10-03 — Protected rollback step adaptation and widening hysteresis
+
+User requests a fix for excessive scards. Scope: recovery policy/LR persistence, Phase5 tests, production-shadow contract and diagnostic report. Read-only state a00bb69a/checkpoint8d184426 has33,478,285 accepted tokens, repetition .236422 versus hard .237721. The prepared bundle works (~5s), but3/14 latest live attempts accepted. Diagnosed: rejected LR halving is undone by the1/128 floor; accepted path also restores that floor; one tolerated success doubles rescue batch. Allow protected-only bounded adaptation down to1/2048; retain accepted LR; require two same-batch/LR non-worsening NLL/repetition successes before widening. Legacy entry/healthy paths, anchor/gates/objectives/token accounting unchanged. Snapshots in /tmp/airi-rejection-snapshot.281 passed/1 optional skip, compile/diff checks passed. Paired read-only current-checkpoint diagnostics (3seeds,16k,batch128): LR1/128 and1/512 each1/3 accepted;1/2048 2/3 accepted. One lower-LR sample still rejected, gains tiny, replay sample not full live data; overlapping timing excluded. No sustained acceptance, language recovery or100k/hour claim. Raw evidence and reproduction: reports/generalist-adaptive-recovery. Publish/check/activate via normal workflows; never manually edit generalist-state.
+
+## 2026-10-10 — Computer runtime reliability
+
+Declared scope: maintenance, supervisor, startup/contract readiness, bounded job output and regression/evidence files. Snapshots saved before edits. 133 selected PC regression tests passed; the desktop-only health check was excluded locally. Matching private runtime CI 38047877497 passed 134 tests, full graphical/MCP/coding self-tests and actual server recovery. Existing model policy, live telemetry and job cancellation behavior preserved. Persist to canonical main after verification.
+
+Index follow-up: native runtime crashed while reading browser caches and binaries. Project index now prunes runtime/package caches, skips binary/oversized/credential files, bounds source/context reads and rejects symlink escapes. Native full self-test passed 33/33; cold index bootstrap 0.457s. Final PC regression selection 136 passed, one desktop-only test excluded locally; private final CI 38049085611 verifies 137 tests plus full GUI/MCP/coding and recovery. Existing path guard retained.
+
+Public publication blocked: GitHub returned HTTP 403, repository above size quota. Private runtime main received the fixes. Preserve the public diff as state/patches/airi-pc-bootstrap-runtime-20261010.patch in the private repository; do not claim public main updated or delete history to force publication.
+
+2026-10-10: Browser-cache follow-up scope: airi-selftest, reliability tests and evidence. Snapshot before edits. First local pytest invocation could not start because its transient venv was absent; restored all edits to snapshot before reapplying. Actual cache/configured-install checks passed with standard-library harness. Complete native CI38057870170 passed139 tests, coding, GUI/MCP and supervisor recovery. Source unchanged outside declared paths. Current runtime provider restored and readiness passed; later control commands timed out, so native follow-up deployment/readback remains pending. Publish full public diff in public training repo without changing frozen active training branch or deleting bootstrap history.
+
+
+2026-10-10 — Operational repair: scope computer/requirements.txt, scripts/airi-coding-selftest, tests/test_runtime_reliability.py and status/report/patch documentation. Snapshot retained before edits. Found missing test HTTP clients and live self-test state pollution; isolate self-test into owned temporary workspace and preserve real tasks/memory/recovery on success/failure. Frozen dialogue training branch remains unchanged.
+
+
+2026-10-10 — Migration scope: six bootstrap repository URL references, README_CHAT_BOOTSTRAP.md, README.md, MIGRATION.md and new runtime regression workflow. Source-only public mirror without old Git history; old checkpoint/release repositories and frozen training commits unchanged. Private desktop Git authentication via repo-scoped deploy key verified; overlay preserved in stash before canonical fetch/checkout.

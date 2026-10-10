@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+export PYTHONPATH="$ROOT/computer${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m control_plane.phone_control "$@"

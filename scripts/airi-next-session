@@ -1,0 +1,134 @@
+#!/bin/sh
+set -eu
+BASE=/home/user/airi
+REPO_URL=https://github.com/arancione3000/airi-pc-runtime.git
+BOOTSTRAP_URL="${BOOTSTRAP_URL:-https://github.com/arancione3000/airi-pc-runtime/archive/refs/heads/main.tar.gz}"
+
+bootstrap_code() {
+  TMP_BOOTSTRAP=$(mktemp -d /tmp/airi-bootstrap.XXXXXX)
+  trap 'rm -rf "$TMP_BOOTSTRAP"' EXIT INT TERM
+  curl -fsSL "$BOOTSTRAP_URL" -o "$TMP_BOOTSTRAP/a.tar.gz" || { echo AIRI_PC_BOOTSTRAP_DOWNLOAD_FAILED >&2; exit 3; }
+  tar -xzf "$TMP_BOOTSTRAP/a.tar.gz" -C "$TMP_BOOTSTRAP" || { echo AIRI_PC_BOOTSTRAP_ARCHIVE_INVALID >&2; exit 4; }
+  TOP=$(find "$TMP_BOOTSTRAP" -mindepth 1 -maxdepth 1 -type d | head -n1)
+  [ -n "$TOP" ] || { echo AIRI_PC_BOOTSTRAP_ARCHIVE_EMPTY >&2; exit 5; }
+  [ -x "$TOP/computer/start.sh" ] || chmod +x "$TOP/computer/start.sh" 2>/dev/null || true
+  if [ -e "$BASE" ]; then
+    BACKUP_BASE="${BASE}.backup.$(date +%s)"
+    mv "$BASE" "$BACKUP_BASE" || { echo AIRI_PC_WORKSPACE_BACKUP_FAILED >&2; exit 7; }
+  fi
+  mv "$TOP" "$BASE" || { echo AIRI_PC_WORKSPACE_ACTIVATE_FAILED >&2; exit 8; }
+}
+
+if [ ! -f "$BASE/computer/start.sh" ]; then bootstrap_code; fi
+
+if ! git -C "$BASE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  TMPG=$(mktemp -d /tmp/airi-git-hydrate.XXXXXX)
+  trap 'rm -rf "$TMPG"' EXIT INT TERM
+  git init -q "$TMPG"
+  git -C "$TMPG" remote add origin https://github.com/arancione3000/airi-pc-runtime.git
+  git -C "$TMPG" fetch -q --depth=1 origin main || { echo AIRI_PC_GIT_FETCH_FAILED >&2; exit 6; }
+  rm -rf "$BASE/.git"
+  cp -a "$TMPG/.git" "$BASE/.git"
+  git -C "$BASE" config user.name 'Airi-PC Agent'
+  git -C "$BASE" config user.email 'airi-pc-agent@users.noreply.github.com'
+  git -C "$BASE" remote set-url origin https://github.com/arancione3000/airi-pc-runtime.git
+  git -C "$BASE" reset -q --hard origin/main
+  git -C "$BASE" branch -M main
+fi
+
+git -C "$BASE" config user.name 'Airi-PC Agent'
+git -C "$BASE" config user.email 'airi-pc-agent@users.noreply.github.com'
+
+MEMORY_TMP=$(mktemp)
+CONTROL_TMP=$(mktemp -d /tmp/airi-control-plane.XXXXXX)
+VIEWER_TMP=$(mktemp -d /tmp/airi-viewer-state.XXXXXX)
+if [ -f "$BASE/.ai/PROJECT_MEMORY.md" ]; then cp "$BASE/.ai/PROJECT_MEMORY.md" "$MEMORY_TMP"; else : > "$MEMORY_TMP"; fi
+if [ -d "$BASE/.ai/control_plane" ]; then cp -a "$BASE/.ai/control_plane/." "$CONTROL_TMP/"; fi
+if [ -f "$BASE/.ai/state/viewer_token" ]; then cp "$BASE/.ai/state/viewer_token" "$VIEWER_TMP/viewer_token"; fi
+cleanup_memory_tmp() { rm -f "$MEMORY_TMP"; rm -rf "$CONTROL_TMP" "$VIEWER_TMP"; }
+trap cleanup_memory_tmp EXIT INT TERM
+
+EXPECTED_SHA="$(git ls-remote "$REPO_URL" refs/heads/main | awk '{print $1}')"
+[ -n "$EXPECTED_SHA" ] || { echo AIRI_PC_SOURCE_REF_MISSING >&2; exit 6; }
+if git -C "$BASE" diff --numstat -- . ":(exclude).ai/**" | awk '$1+$2>0 {found=1} END {exit found ? 0 : 1}'; then echo AIRI_PC_SOURCE_DIRTY >&2; exit 13; fi
+git -C "$BASE" fetch -q --depth=1 origin main || { echo AIRI_PC_GIT_FETCH_FAILED >&2; exit 7; }
+FETCHED_SHA=$(git -C "$BASE" rev-parse FETCH_HEAD)
+[ "$FETCHED_SHA" = "$EXPECTED_SHA" ] || { echo AIRI_PC_SOURCE_SHA_MISMATCH >&2; exit 8; }
+git -C "$BASE" checkout -q -B main "$EXPECTED_SHA" || { echo AIRI_PC_BRANCH_SYNC_FAILED >&2; exit 9; }
+CURRENT_SHA="$EXPECTED_SHA"
+mkdir -p "$BASE/.ai"
+printf '%s\n' "$CURRENT_SHA" > "$BASE/.ai/.runtime_source_sha"
+
+if [ -s "$MEMORY_TMP" ]; then
+  mkdir -p "$BASE/.ai"
+  cp "$MEMORY_TMP" "$BASE/.ai/PROJECT_MEMORY.md"
+fi
+mkdir -p "$BASE/.ai/control_plane"
+cp -a "$CONTROL_TMP/." "$BASE/.ai/control_plane/" 2>/dev/null || true
+if [ -f "$VIEWER_TMP/viewer_token" ]; then mkdir -p "$BASE/.ai/state"; cp "$VIEWER_TMP/viewer_token" "$BASE/.ai/state/viewer_token"; chmod 600 "$BASE/.ai/state/viewer_token" 2>/dev/null || true; fi
+
+chmod +x "$BASE"/scripts/airi-* "$BASE"/computer/start.sh 2>/dev/null || true
+
+if [ ! -x "$BASE/.venv/bin/python" ]; then
+  echo '{"status":"repairing_missing_python_runtime"}' > /tmp/airi-next-session-status.json
+  python3 -m venv "$BASE/.venv"
+  "$BASE/.venv/bin/pip" install --disable-pip-version-check -r "$BASE/computer/requirements.txt" >/tmp/airi-next-session-venv.log 2>&1 || { cat /tmp/airi-next-session-venv.log >&2; echo AIRI_PC_VENV_REPAIR_FAILED >&2; exit 11; }
+  "$BASE/.venv/bin/python" -m playwright install chromium >>/tmp/airi-next-session-venv.log 2>&1 || { cat /tmp/airi-next-session-venv.log >&2; echo AIRI_PC_PLAYWRIGHT_REPAIR_FAILED >&2; exit 12; }
+fi
+
+READY_JSON=""
+if READY_JSON=$(curl -fsS --max-time 5 http://127.0.0.1:9010/ready 2>/dev/null); then
+  RUNTIME_SHA=$(printf '%s' "$READY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("source_sha", ""))' 2>/dev/null || true)
+  if [ -n "$RUNTIME_SHA" ] && [ "$RUNTIME_SHA" = "$CURRENT_SHA" ]; then
+    echo '{"status":"reused_existing_runtime","server":"127.0.0.1:9010","reason":"source_sha_matches"}' >/tmp/airi-next-session-status.json
+  else
+    AIRI_FORCE_RESTART=1 AIRI_EXPECTED_SHA="$CURRENT_SHA" "$BASE/computer/start.sh" >/tmp/airi-next-session-status.json 2>&1 || true
+  fi
+else
+  AIRI_FORCE_RESTART=1 AIRI_EXPECTED_SHA="$CURRENT_SHA" "$BASE/computer/start.sh" >/tmp/airi-next-session-status.json 2>&1 || true
+  READY=0
+  for _ in $(seq 1 20); do
+    if curl -fsS --max-time 3 http://127.0.0.1:9010/ready >/dev/null 2>&1; then READY=1; break; fi
+    sleep 1
+  done
+  if [ "$READY" -ne 1 ]; then echo AIRI_PC_RUNTIME_NOT_READY >&2; exit 10; fi
+fi
+
+if [ -x "$BASE/scripts/airi-watchdog" ]; then
+  nohup "$BASE/scripts/airi-watchdog" >>"$BASE/logs/watchdog-launch.log" 2>&1 < /dev/null &
+fi
+
+if [ -x "$BASE/scripts/airi-tailscale-supervisor" ]; then
+  if ! pgrep -f '[a]iri-tailscale-supervisor' >/dev/null 2>&1; then
+    nohup "$BASE/scripts/airi-tailscale-supervisor" >>"$BASE/logs/tailscale-supervisor-launch.log" 2>&1 < /dev/null &
+  fi
+  for _ in $(seq 1 "${AIRI_TAILSCALE_BOOT_WAIT:-8}"); do
+    [ -s "$BASE/.ai/state/tailscale/url" ] && break
+    sleep 1
+  done
+fi
+
+if [ -x "$BASE/scripts/airi-tunnel-supervisor" ] && [ "${AIRI_ALLOW_PINGGY_FALLBACK:-1}" = "1" ]; then
+  # Keep the fallback supervisor resident. It stays dormant while Tailscale is healthy
+  # and activates Pinggy only after Tailscale becomes unavailable.
+  if ! pgrep -f '[a]iri-tunnel-supervisor' >/dev/null 2>&1; then
+    nohup "$BASE/scripts/airi-tunnel-supervisor" >>"$BASE/logs/tunnel-supervisor-launch.log" 2>&1 < /dev/null &
+  fi
+fi
+
+if [ -x "$BASE/scripts/airi-relay-updater" ]; then
+  if ! pgrep -f '[a]iri-relay-updater' >/dev/null 2>&1; then
+    nohup "$BASE/scripts/airi-relay-updater" >>"$BASE/logs/relay-updater-launch.log" 2>&1 < /dev/null &
+  fi
+fi
+
+if [ -x "$BASE/scripts/airi-viewer-link" ]; then "$BASE/scripts/airi-viewer-link" || true; fi
+
+cat /tmp/airi-next-session-status.json
+if [ -f "$BASE/.ai/state/airi-endpoint.json" ]; then
+  cat "$BASE/.ai/state/airi-endpoint.json"
+fi
+"$BASE/scripts/airi-control" status
+"$BASE/scripts/airi-control" browser-status
+"$BASE/scripts/airi-control" browser-state
+"$BASE/scripts/airi-selftest"
