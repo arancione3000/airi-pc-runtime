@@ -5,3 +5,6 @@ The original airi-pc-bootstrap repository exceeds GitHub size quota. This clean 
 Runtime reconstruction scripts now use arancione3000/airi-pc-runtime. The private desktop workspace stays on arancione3000/airi-pc and has its own repository-scoped SSH deploy key. Private key files remain outside Git.
 
 Only the runtime regression workflow is enabled in this new source repository. Original Generalist/training workflow definitions remain in the historical repository and active dedicated training repository. Runtime regression executes shared runtime/security/recovery tests and full coding/GUI/MCP/recovery checks.
+
+
+Runtime regression attempt1 detected a missing dependency bootstrap entrypoint before any runtime test. Added scripts/bootstrap.sh with explicit dependency/browser setup and failure propagation; all existing checks retained for attempt2.
