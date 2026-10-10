@@ -1,0 +1,58 @@
+name: Publish verified runtime snapshot
+on:
+  push:
+    branches: [main]
+    paths: ['migration/runtime-source.json.zlib.b64', '.github/workflows/publish-runtime.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: target
+      - uses: actions/checkout@v4
+        with:
+          repository: arancione3000/airi-pc-bootstrap
+          ref: d078e718dfba0d68babd31de90fa55c0beac1951
+          path: legacy
+          persist-credentials: false
+      - name: Apply pinned verified runtime patch
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arancione3000/airi-offline-training/ecc7b2531f8b20f6582a0e0b77887605a6284b49/patches/airi-pc-runtime-20261010.patch -o /tmp/runtime.patch
+          echo 'a6dc1ed6105ea9741b9369c20a7b4e1a5a80d52d8a865784f847eacb6366308a  /tmp/runtime.patch' | sha256sum -c -
+          git -C legacy apply --check /tmp/runtime.patch
+          git -C legacy apply /tmp/runtime.patch
+      - name: Assemble and verify clean public source tree
+        run: |
+          python3 - <<'PY'
+          import base64,json,zlib,shutil,subprocess,os,tempfile
+          from pathlib import Path
+          target=Path('target').resolve(); source=Path('legacy').resolve()
+          bundle=json.loads(zlib.decompress(base64.b64decode((target/'migration/runtime-source.json.zlib.b64').read_text())))
+          for name,data in bundle['overlays'].items():
+              rel=Path(name); assert not rel.is_absolute() and '..' not in rel.parts
+              path=source/rel; path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(base64.b64decode(data))
+          for name in bundle['files']:
+              rel=Path(name); assert not rel.is_absolute() and '..' not in rel.parts
+              dest=target/rel; dest.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(source/rel,dest)
+          def git(*args,env=None):
+              return subprocess.check_output(['git',*args],cwd=target,env=env,text=True).strip()
+          with tempfile.TemporaryDirectory() as folder:
+              env=dict(os.environ,GIT_INDEX_FILE=folder+'/index')
+              git('read-tree','--empty',env=env)
+              git('add','-f','--',*bundle['files'],env=env)
+              actual=git('write-tree',env=env)
+              assert actual==bundle['tree'],(actual,bundle['tree'])
+              print('Verified source tree',actual,len(bundle['files']),'files')
+          git('config','user.name','Airi-PC Agent')
+          git('config','user.email','airi-pc-agent@users.noreply.github.com')
+          git('add','-f','--',*bundle['files'])
+          if git('diff','--cached','--name-only'):
+              git('commit','-m','feat: publish verified clean runtime source and migrate bootstrap URLs')
+              git('push','origin','HEAD:main')
+          else: print('Source tree already published')
+          PY

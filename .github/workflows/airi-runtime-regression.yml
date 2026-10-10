@@ -1,0 +1,80 @@
+name: AIRI-PC regression
+
+on:
+  push:
+    branches: [main]
+    paths: ["computer/**", "scripts/**", "tests/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: airi-pc-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  computer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AIRIPC_WORKSPACE_ROOT: ${{ github.workspace }}
+      DISPLAY: ':199'
+      DISPLAY_NUM: '199'
+      AIRI_BROWSER_HEADLESS: '0'
+      AIRI_EXPECTED_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install desktop test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb xdotool openbox xterm x11-utils python3-tk tesseract-ocr
+      - name: Bootstrap and validate source
+        run: |
+          bash scripts/bootstrap.sh
+          .venv/bin/python -m pip install --quiet httpx requests
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+          .venv/bin/python scripts/airi-rebuild-verify.py
+      - name: Start desktop and server
+        run: timeout 300s sh computer/start.sh
+      - name: Run regression and coding tests
+        run: |
+          .venv/bin/python -m pytest -q tests/test_autonomous_workflow.py tests/test_bootstrap_safety.py tests/test_browser_recovery.py tests/test_browser_screenshot_resilience.py tests/test_checkpoint_engine.py tests/test_legacy_mcp_compat.py tests/test_runtime_reliability.py tests/test_security_boundaries.py tests/test_session_resume_persistence.py tests/test_startup_hardening.py tests/test_supervisor_hardening.py tests/test_viewer.py tests/test_watchdog_hardening.py
+          .venv/bin/python scripts/airi-coding-selftest
+      - name: Verify graphical operations and MCP
+        run: timeout 300s .venv/bin/python scripts/airi-selftest
+      - name: Verify supervisor recovery after server failure
+        run: |
+          .venv/bin/python - <<'PY'
+          import json, os, signal, time, urllib.request
+          from pathlib import Path
+          pid_file = Path('logs/computer-server.pid')
+          old_pid = int(pid_file.read_text())
+          os.kill(old_pid, signal.SIGTERM)
+          deadline = time.monotonic() + 90
+          while time.monotonic() < deadline:
+              try:
+                  new_pid = int(pid_file.read_text())
+                  with urllib.request.urlopen('http://127.0.0.1:9010/ready', timeout=3) as response:
+                      ready = json.load(response)
+                  if new_pid != old_pid and ready.get('ready') is True and ready.get('source_sha') == os.environ['AIRI_EXPECTED_SHA']:
+                      print('Supervisor restored the matching runtime after server termination')
+                      break
+              except (OSError, ValueError):
+                  pass
+              time.sleep(1)
+          else:
+              raise SystemExit('Supervisor recovery did not restore a ready runtime')
+          PY
+      - name: Collect diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: airi-pc-test-logs
+          path: logs/
+          retention-days: 7
