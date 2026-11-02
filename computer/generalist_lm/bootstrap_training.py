@@ -1144,6 +1144,31 @@ def _phase5_recovery_segment_budget(
     return max(62_500, min(requested, int(math.ceil(requested / divisor))))
 
 
+def _language_metric(report: dict[str, Any], key: str, default: float) -> float:
+    """Read a diagnostic value without mistaking a measured zero for absence."""
+    value = report.get(key)
+    if value is None:
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        return float("nan")
+
+
+def _invalid_language_metrics(report: dict[str, Any], *, label: str) -> list[str]:
+    """Reject invalid evidence before comparisons can silently ignore NaNs."""
+    required = {"language_nll", "repetition_rate"}
+    optional = {
+        "generation_similarity", "multiword_output_rate", "non_empty_rate",
+        "token_entropy", "longest_repeated_token_run",
+    }
+    return [
+        f"{label} language metric {key} is missing or non-finite"
+        for key in sorted(required | (optional & report.keys()))
+        if not math.isfinite(_language_metric(report, key, float("nan")))
+    ]
+
+
 def _phase5_language_fragile(
     before: dict[str, Any],
     anchor: dict[str, Any],
@@ -1156,11 +1181,12 @@ def _phase5_language_fragile(
     than the hard durable repetition guard: the lineage must create real
     headroom before transaction size is allowed to grow.
     """
-    repetition = float(before.get("repetition_rate", 1.0) or 1.0)
-    anchor_repetition = float(anchor.get("repetition_rate", 1.0) or 1.0)
-    multiword = float(before.get("multiword_output_rate", 0.0) or 0.0)
+    repetition = _language_metric(before, "repetition_rate", 1.0)
+    anchor_repetition = _language_metric(anchor, "repetition_rate", 1.0)
+    multiword = _language_metric(before, "multiword_output_rate", 0.0)
     return bool(
-        int(consecutive_rejections) > 0
+        not all(math.isfinite(v) for v in (repetition, anchor_repetition, multiword))
+        or int(consecutive_rejections) > 0
         or bool(before.get("pathological_repetition"))
         or repetition >= anchor_repetition + 0.05
         or multiword < 0.80
@@ -2141,11 +2167,14 @@ def _anti_collapse_rescue_gate(
     before: dict[str, Any],
     after: dict[str, Any],
 ) -> tuple[bool, list[str]]:
-    reasons: list[str] = []
-    before_rep = float(before.get("repetition_rate", 1.0) or 1.0)
-    after_rep = float(after.get("repetition_rate", 1.0) or 1.0)
-    before_nll = float(before.get("language_nll", float("inf")))
-    after_nll = float(after.get("language_nll", float("inf")))
+    reasons = _invalid_language_metrics(before, label="before")
+    reasons.extend(_invalid_language_metrics(after, label="candidate"))
+    if reasons:
+        return False, reasons
+    before_rep = _language_metric(before, "repetition_rate", 1.0)
+    after_rep = _language_metric(after, "repetition_rate", 1.0)
+    before_nll = _language_metric(before, "language_nll", float("inf"))
+    after_nll = _language_metric(after, "language_nll", float("inf"))
 
     if after_nll > before_nll + 0.08:
         reasons.append("language NLL regressed by more than 0.08")
@@ -2178,8 +2207,10 @@ def _anti_collapse_rescue_gate(
 
 def _language_quality(report: dict[str, Any]) -> float:
     """Small deterministic scalar used only to compare the same held-out suite."""
-    nll = float(report.get("language_nll", 1_000_000.0) or 1_000_000.0)
-    repetition = float(report.get("repetition_rate", 1.0) or 1.0)
+    if _invalid_language_metrics(report, label="report"):
+        return -1_000_000.0
+    nll = _language_metric(report, "language_nll", 1_000_000.0)
+    repetition = _language_metric(report, "repetition_rate", 1.0)
     similarity = float(report.get("generation_similarity", 0.0) or 0.0)
     multiword = float(report.get("multiword_output_rate", 0.0) or 0.0)
     nonempty = float(report.get("non_empty_rate", 0.0) or 0.0)
@@ -2201,11 +2232,14 @@ def _language_guard_violations(
     candidate: dict[str, Any],
 ) -> list[str]:
     """Return material held-out language regressions versus a durable anchor."""
-    reasons: list[str] = []
-    ref_nll = float(reference.get("language_nll", float("inf")))
-    cand_nll = float(candidate.get("language_nll", float("inf")))
-    ref_rep = float(reference.get("repetition_rate", 1.0) or 1.0)
-    cand_rep = float(candidate.get("repetition_rate", 1.0) or 1.0)
+    reasons = _invalid_language_metrics(reference, label="anchor")
+    reasons.extend(_invalid_language_metrics(candidate, label="candidate"))
+    if reasons:
+        return reasons
+    ref_nll = _language_metric(reference, "language_nll", float("inf"))
+    cand_nll = _language_metric(candidate, "language_nll", float("inf"))
+    ref_rep = _language_metric(reference, "repetition_rate", 1.0)
+    cand_rep = _language_metric(candidate, "repetition_rate", 1.0)
     ref_similarity = float(reference.get("generation_similarity", 0.0) or 0.0)
     cand_similarity = float(candidate.get("generation_similarity", 0.0) or 0.0)
     ref_multi = float(reference.get("multiword_output_rate", 0.0) or 0.0)
@@ -2301,14 +2335,16 @@ def _segment_language_gate(
     """
     before_anchor = _language_guard_violations(anchor, before)
     after_anchor = _language_guard_violations(anchor, after)
-    local_reasons: list[str] = []
+    local_reasons = _invalid_language_metrics(before, label="before")
+    local_reasons.extend(_invalid_language_metrics(after, label="candidate"))
+    local_reasons.extend(_invalid_language_metrics(anchor, label="anchor"))
 
-    before_nll = float(before.get("language_nll", float("inf")))
-    after_nll = float(after.get("language_nll", float("inf")))
-    before_rep = float(before.get("repetition_rate", 1.0) or 1.0)
-    after_rep = float(after.get("repetition_rate", 1.0) or 1.0)
-    before_similarity = float(before.get("generation_similarity", 0.0) or 0.0)
-    after_similarity = float(after.get("generation_similarity", 0.0) or 0.0)
+    before_nll = _language_metric(before, "language_nll", float("inf"))
+    after_nll = _language_metric(after, "language_nll", float("inf"))
+    before_rep = _language_metric(before, "repetition_rate", 1.0)
+    after_rep = _language_metric(after, "repetition_rate", 1.0)
+    before_similarity = _language_metric(before, "generation_similarity", 0.0)
+    after_similarity = _language_metric(after, "generation_similarity", 0.0)
 
     if after_nll > before_nll + 0.08:
         local_reasons.append("segment language NLL regressed by more than 0.08")
@@ -2321,9 +2357,9 @@ def _segment_language_gate(
         local_reasons.append("segment introduced pathological repetition")
     if after_similarity < before_similarity - 0.04:
         local_reasons.append("segment generation similarity regressed")
-    if float(after.get("multiword_output_rate", 0.0) or 0.0) < max(
+    if _language_metric(after, "multiword_output_rate", 0.0) < max(
         0.0,
-        float(before.get("multiword_output_rate", 0.0) or 0.0) - 0.15,
+        _language_metric(before, "multiword_output_rate", 0.0) - 0.15,
     ):
         local_reasons.append("segment multiword output rate regressed")
 
@@ -2757,21 +2793,23 @@ def _language_rehabilitation_gate(
     """Apply increasingly strict held-out gates without training on the probes."""
     if stage not in PHASE5_LANGUAGE_REHABILITATION_STAGES:
         raise ValueError(f"unknown language rehabilitation stage: {stage}")
-    reasons: list[str] = []
-    before_nll = float(before.get("language_nll", float("inf")))
-    after_nll = float(after.get("language_nll", float("inf")))
-    before_rep = float(before.get("repetition_rate", 1.0) or 1.0)
-    after_rep = float(after.get("repetition_rate", 1.0) or 1.0)
-    before_similarity = float(before.get("generation_similarity", 0.0) or 0.0)
-    after_similarity = float(after.get("generation_similarity", 0.0) or 0.0)
-    before_multi = float(before.get("multiword_output_rate", 0.0) or 0.0)
-    after_multi = float(after.get("multiword_output_rate", 0.0) or 0.0)
+    reasons = _invalid_language_metrics(before, label="before")
+    reasons.extend(_invalid_language_metrics(after, label="candidate"))
+    reasons.extend(_invalid_language_metrics(anchor, label="anchor"))
+    before_nll = _language_metric(before, "language_nll", float("inf"))
+    after_nll = _language_metric(after, "language_nll", float("inf"))
+    before_rep = _language_metric(before, "repetition_rate", 1.0)
+    after_rep = _language_metric(after, "repetition_rate", 1.0)
+    before_similarity = _language_metric(before, "generation_similarity", 0.0)
+    after_similarity = _language_metric(after, "generation_similarity", 0.0)
+    before_multi = _language_metric(before, "multiword_output_rate", 0.0)
+    after_multi = _language_metric(after, "multiword_output_rate", 0.0)
 
     if after_nll > before_nll + 0.10:
         reasons.append("protected language NLL regressed by more than 0.10")
-    if float(after.get("non_empty_rate", 0.0) or 0.0) < max(
+    if _language_metric(after, "non_empty_rate", 0.0) < max(
         0.60,
-        float(before.get("non_empty_rate", 0.0) or 0.0) - 0.10,
+        _language_metric(before, "non_empty_rate", 0.0) - 0.10,
     ):
         reasons.append("protected non-empty output rate regressed")
     before_anchor_violations = _language_guard_violations(anchor, before)
@@ -2783,20 +2821,20 @@ def _language_rehabilitation_gate(
         # durable non-pathological anchor is the correct stability reference.
         entropy_floor = max(
             1.25,
-            float(anchor.get("token_entropy", 0.0) or 0.0) - 0.60,
+            _language_metric(anchor, "token_entropy", 0.0) - 0.60,
         )
     else:
         entropy_floor = max(
             1.25,
-            float(before.get("token_entropy", 0.0) or 0.0) - 0.75,
+            _language_metric(before, "token_entropy", 0.0) - 0.75,
         )
-    if float(after.get("token_entropy", 0.0) or 0.0) < entropy_floor:
+    if _language_metric(after, "token_entropy", 0.0) < entropy_floor:
         reasons.append("protected token entropy collapsed")
 
     if stage == "R1_bilingual_foundations":
         gate = "repetition_recovery"
-        run_gain = int(before.get("longest_repeated_token_run", 0) or 0) - int(
-            after.get("longest_repeated_token_run", 0) or 0
+        run_gain = _language_metric(before, "longest_repeated_token_run", 0.0) - (
+            _language_metric(after, "longest_repeated_token_run", 0.0)
         )
         if (
             bool(after.get("pathological_repetition"))
