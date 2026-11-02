@@ -2259,6 +2259,81 @@ def test_segment_language_guard_rejects_regression_from_good_anchor():
     )
 
 
+def test_language_gates_preserve_zero_repetition_and_zero_nll():
+    before = _language_report(
+        nll=2.0, repetition=0.10, similarity=0.30,
+        multiword=1.0, pathological=False,
+    )
+    after = {**before, "repetition_rate": 0.0}
+
+    accepted, report = _segment_language_gate(before, after, before)
+
+    assert accepted is True
+    assert report["after_quality"] - report["before_quality"] == pytest.approx(0.15)
+    assert _phase5_language_fragile(after, before) is False
+    assert _language_quality({**after, "language_nll": 0.0}) == pytest.approx(
+        _language_quality(after) + 2.0
+    )
+    rescue_accepted, _ = _anti_collapse_rescue_gate(before, after)
+    assert rescue_accepted is True
+    rehab_accepted, rehab = _language_rehabilitation_gate(
+        "R2_simple_responses", before, after, before,
+    )
+    assert rehab_accepted is True
+    assert rehab["after_quality"] > rehab["before_quality"]
+
+
+def test_zero_repetition_anchor_still_protects_its_original_boundary():
+    anchor = _language_report(
+        nll=2.0, repetition=0.0, similarity=0.30,
+        multiword=1.0, pathological=False,
+    )
+    candidate = {**anchor, "repetition_rate": 0.10}
+    # Start locally close enough to isolate the durable +0.08 boundary.
+    before = {**anchor, "repetition_rate": 0.05}
+
+    accepted, report = _segment_language_gate(before, candidate, anchor)
+
+    assert accepted is False
+    assert report["local_reasons"] == []
+    assert any("repetition rate" in reason for reason in report["after_anchor_violations"])
+
+
+@pytest.mark.parametrize("metric", [
+    "language_nll", "repetition_rate", "generation_similarity",
+    "multiword_output_rate", "non_empty_rate", "token_entropy",
+    "longest_repeated_token_run",
+])
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), -float("inf"), None, "invalid"])
+@pytest.mark.parametrize("position", ["before", "candidate", "anchor"])
+def test_language_gates_reject_invalid_evidence(metric, invalid, position):
+    healthy = _language_report(
+        nll=2.0, repetition=0.10, similarity=0.30,
+        multiword=1.0, pathological=False,
+    )
+    reports = {name: dict(healthy) for name in ("before", "candidate", "anchor")}
+    reports[position][metric] = invalid
+
+    accepted, report = _segment_language_gate(
+        reports["before"], reports["candidate"], reports["anchor"],
+    )
+
+    assert accepted is False
+    assert any("non-finite" in reason and metric in reason for reason in report["local_reasons"])
+    rehab_accepted, rehab = _language_rehabilitation_gate(
+        "R1_bilingual_foundations", reports["before"],
+        reports["candidate"], reports["anchor"],
+    )
+    assert rehab_accepted is False
+    assert any("non-finite" in reason and metric in reason for reason in rehab["reasons"])
+    if position != "anchor":
+        rescue_accepted, reasons = _anti_collapse_rescue_gate(
+            reports["before"], reports["candidate"],
+        )
+        assert rescue_accepted is False
+        assert any("non-finite" in reason and metric in reason for reason in reasons)
+
+
 def test_segment_language_guard_accepts_measurable_recovery_toward_anchor():
     anchor = _language_report(
         nll=2.85,
